@@ -1,0 +1,36 @@
+[project]
+name = "phishing-sms-ai"
+version = "0.1.0"
+description = "FastAPI MVP for LINE screenshot phishing analysis"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.115.0",
+    "pydantic-settings>=2.6.0",
+    "uvicorn[standard]>=0.32.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+    "ruff>=0.8.0",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "I",
+    "UP",
+    "B",
+    "SIM",
+]
+
+[tool.pytest.ini_options]
+pythonpath = [
+    ".",
+]
