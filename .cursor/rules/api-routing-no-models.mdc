@@ -1,0 +1,72 @@
+---
+description: FastAPI ルートでドメインモデルを直接参照しないためのガイド
+globs: app/api/v1/endpoints/**/*.py
+alwaysApply: false
+---
+
+# API ルート層でモデルを直接参照しない
+
+## 方針
+
+- **FastAPI のルート層（`app/api/v1/endpoints/**`）では ORM モデルを直接参照しない**。
+- ビジネスロジックや DB アクセスは **必ず service 層（`app/services/**`）に集約**する。
+- ルート層は「リクエストの受け取り・バリデーション」と「service 呼び出し・レスポンス組み立て」に専念する。
+
+## 禁止パターン（NG）
+
+- ルート関数内で `app.models.**` を import して使う。
+- ルート関数内で `select(...)` などの SQLAlchemy クエリを直接書く。
+- モデルインスタンスをそのままレスポンスに返す（Pydantic スキーマを経由しない）。
+
+```python
+# ❌ NG: ルートから直接モデル・クエリを呼ぶ
+from app.models.common.announcement import AnnouncementMaster
+from sqlalchemy import select
+
+@router.get("/announcements")
+async def list_announcements(..., db: AsyncSession = Depends(get_db)):
+    stmt = select(AnnouncementMaster).where(...)
+    result = await db.execute(stmt)
+    announcements = result.scalars().all()
+    return announcements  # モデル直接返却も NG
+```
+
+## 推奨パターン（OK）
+
+- DB アクセス・ビジネスロジックは `app/services/**` に切り出し、ルートからは **service 関数を呼ぶだけ**にする。
+- レスポンスは **必ず Pydantic スキーマ (`app/schemas/**`) にマッピング**して返す。
+
+```python
+# ✅ OK: ルートは service を呼び出し、スキーマに詰め替える
+from app.services.announcement import list_announcements
+from app.schemas.announcement import AnnouncementListResponse, AnnouncementResponse
+
+@router.get("/announcements", response_model=AnnouncementListResponse)
+async def list_announcements_endpoint(..., db: AsyncSession = Depends(get_db)):
+    announcements, total = await list_announcements(db=db, ...)
+
+    items = [
+        AnnouncementResponse(
+            id=a.id,
+            title=a.title,
+            # ...
+        )
+        for a in announcements
+    ]
+
+    return AnnouncementListResponse(
+        items=items,
+        total=total,
+        # ...
+    )
+```
+
+## 例外・補足
+
+- 型チェックのために `TYPE_CHECKING` ブロック内でモデル型を import するのは許容する。
+  - 例: `if TYPE_CHECKING: from app.models.identity.user import User`
+- **Depends で注入される値として ORM モデルをルート関数の引数で受け取る**のは例外として許容する（主に認証・認可のため）。
+  - 例: `current_user: User = Depends(get_current_user)`
+  - 条件: ルート関数内で新たに `select(...)` 等のクエリを書かず、モデルの参照は `id` 等の最小限の属性参照に留める
+- Alembic マイグレーションやテストなど、エンドポイント以外のコードにはこのルールは直接適用しない。
+

@@ -1,0 +1,11 @@
+---
+description: アクセス禁止
+globs: [.env, .env.local, .env.development, .env.staging, .env.production, .env.test]
+alwaysApply: false
+---
+**DO NOT READ!**
+**DO NOT WRITE!**
+
+To enhance security and prevent accidental exposure of sensitive credentials to AI systems, we should block access to environment files containing credentials.
+
+機密認証情報が誤って AI システムに公開されるのを防止するため、認証情報を含む環境ファイルへのアクセスをブロックする。

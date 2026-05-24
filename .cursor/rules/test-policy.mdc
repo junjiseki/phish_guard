@@ -1,0 +1,70 @@
+---
+description: テストポリシー
+globs: *
+alwaysApply: true
+---
+# テストポリシー
+
+※ 本資料は書きかけです。内容は随時見直します。
+
+## 目的
+
+* 回帰バグを防ぎ、リファクタリングの安心感を担保する
+* 仕様のドキュメントとして機能する自動テストを提供する
+* 開発速度を落とさず、むしろ加速させる仕組みを整える
+
+---
+
+## 全体方針
+
+1. **テスト駆動開発 (TDD) を原則とし、Red → Green → Refactor のサイクルを徹底する**
+2. 新規コードは必ずテストを作成し、**継続的インテグレーション (CI) で失敗を検知**
+3. テストの可読性を最優先し、DRY よりも **読みやすさ・意図の明確さ** を重視する
+4. カバレッジ目標: 70% 以上を維持し、クリティカルパスは 100% を目指す
+5. 外部 I/O (DB、API、ファイル、時間 など) はモック／スタブを用いて副作用を排除
+6. 遅い統合テストは最小限にとどめ、ユニットテストで網羅する
+
+---
+
+## ディレクトリ構成
+
+```
+tests/
+  conftest.py         # pytest 専用 fixture / ファクトリ定義
+  test_*.py          # テストファイル
+  fixtures/          # テストデータ
+  factories/         # テスト用ファクトリクラス
+```
+
+---
+
+## バックエンド (FastAPI + pytest)
+
+### 使用ツール
+
+* `pytest`, `pytest-asyncio`, `pytest-cov`
+* `httpx` : HTTP クライアント（テスト用）
+* `pytest-mock` : モック機能
+
+### ガイドライン
+
+* 実行は`uv run pytest -q`で実行する
+* カバレッジは`uv run pytest --cov=app --cov-report=html tests/`で実行する
+* 1 テスト 1 アサートが基本（ただし関係が明確なら複数可）
+* データ作成はテスト専用のヘルパー関数を使用
+* 外部 API コールは `httpx` でモック
+* 非同期関数は `pytest.mark.asyncio` を使用
+* **マジックナンバー**: 
+  - ビジネスルールに関連する数値は `app/constants.py` からインポートする
+  - テスト専用の期待値はテストファイル内で定数定義する（例: `EXPECTED_UPDATE_STATEMENTS_COUNT = 3`）
+  - **テストデータの値（quantity、seats、フェーズ数など）は直接数値を使用してよい**（例: `seats=5`, `quantity=3`）
+  - **アサーション内の数値リテラルは定数として定義する**（例: `assert len(phases) == EXPECTED_PHASES_COUNT_2`）
+    - リントエラー（PLR2004: Magic value used in comparison）を避けるため、アサーション内の数値は定数を使用すること
+    - テストファイルの先頭で `EXPECTED_*` や `TEST_*` などの定数を定義する
+    - 例外的に、`assert response.status_code == 200` のようなHTTPステータスコードは直接数値を使用してよい
+
+---
+
+## CI との統合
+
+* GitHub Actionsによる自動テスト実行

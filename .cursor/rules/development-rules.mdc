@@ -1,0 +1,101 @@
+---
+description: 開発ルール
+globs: *
+alwaysApply: true
+---
+
+## 概要
+
+本ドキュメントでは、本プロジェクトにおける開発のベストプラクティスを定義します。これらのプラクティスは、コードの品質、保守性、セキュリティを確保し、チーム全体で一貫した開発を行うための指針となります。
+
+## 一般的な原則
+
+### DRY (Don't Repeat Yourself)
+
+- コードの重複を避け、再利用可能なコンポーネントやユーティリティを作成する
+- 同じロジックが複数の場所に存在する場合は、共通のモジュールに抽出する
+- 設定値やマジックナンバーは定数として定義する
+
+### KISS (Keep It Simple, Stupid)
+
+- シンプルで理解しやすいコードを書く
+- 過度に複雑な実装は避け、必要に応じてリファクタリングする
+- 一つの関数やメソッドは一つの責務のみを持つようにする
+
+### YAGNI (You Aren't Gonna Need It)
+
+- 現時点で必要のない機能は実装しない
+- 将来の拡張性を考慮しつつも、過度な抽象化は避ける
+- 要件に基づいた実装を行い、スコープクリープを防ぐ
+
+### 関心の分離
+
+- ビジネスロジック、データアクセス、プレゼンテーションを適切に分離する
+- バックエンドとフロントエンドの責務を明確に分ける
+- モジュール間の依存関係を最小限に保つ
+
+### UUID主キー運用ポリシー
+
+- 原則として、テーブルの主キーは PostgreSQL `UUID` 型で統一する。
+- 主キー値はアプリケーション層で `uuid4()` を生成し、DB依存のシーケンスは使用しない。
+- 外部キーも同様に `UUID` 型を用い、関連モデル／マイグレーションの整合を保つこと。
+
+### 非同期処理ポリシー
+
+- 本プロジェクトでは非同期処理（async/await）を基本とする
+- FastAPIのエンドポイントは原則として `async def` で実装する
+- SQLAlchemyは `AsyncSession` を使用し、`await session.execute()` でクエリを実行する
+- データベースセッションは `async_sessionmaker` から取得し、依存注入で提供する
+- I/O待ちが発生する処理（データベースアクセス、外部API呼び出し、ファイルI/O等）は必ず `async/await` で実装する
+- サービス層のメソッドもデータベースアクセスを含む場合は `async def` で実装し、呼び出し元で `await` する
+- CPU計算など短時間で終わる純粋な処理は同期のままでも問題ない
+- やむを得ず同期ライブラリを使う必要がある場合は、`starlette.concurrency.run_in_threadpool` でスレッドにオフロードする
+- イベントループをブロックする同期処理を直接呼び出してはならない
+
+## コーディング規約
+
+- コメントは冗長にならないように気をつけ、コードの「なぜ」を説明する
+- [PEP 8](https://peps.python.org/pep-0008/)に準拠する
+- 変数名、関数名はスネークケース（snake_case）を使用する
+- クラス名はパスカルケース（PascalCase）を使用する
+- 定数名は大文字のスネークケース（UPPER_SNAKE_CASE）を使用する
+- 型ヒントを積極的に使用する
+- Docstringは原則としてすべての関数、クラス、モジュールに記述する
+
+## 業務エラーハンドリング
+
+### 基本方針
+
+- **業務エラー**: ユーザーに表示すべきエラー（バリデーション、重複等）
+  - サービス層で `BusinessException` をraise
+  - レスポンスに `error_code` を含む（例: `{"detail": "...", "error_code": "FY003"}`）
+- **システムエラー**: 内部エラー（DB接続、外部API障害等）
+  - `HTTPException` を使用
+  - `error_code` を含まない
+
+### 実装パターン
+
+1. **エラーコード定義** (`app/errors/codes.py`)
+   ```python
+   FISCAL_YEAR_OVERLAP = ("FY004", "指定された期間は既存の会計年度と重複しています")
+   PERIOD_INVALID = ("FY003", "会計年度の期間が不正です: {reason}")  # 変数展開可能
+   ```
+
+2. **サービス層** - `BusinessException` をraise
+   ```python
+   from app.errors import BusinessException, ErrorCode
+
+   if fy_start >= fy_end:
+       raise BusinessException(
+           error_code=ErrorCode.FISCAL_YEAR_PERIOD_INVALID,
+           params={"reason": "開始日が終了日以降"}
+       )
+   ```
+
+3. **エンドポイント層** - try-catchは不要（自動ハンドリング）
+   ```python
+   # サービス層を呼ぶだけ
+   result = await service.create_fiscal_year(db, ...)
+   ```
+
+詳細は README.md の「業務エラーハンドリング」セクションを参照。

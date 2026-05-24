@@ -1,0 +1,244 @@
+---
+description: ロギングガイドライン
+globs:
+alwaysApply: true
+---
+
+# ロギングガイドライン
+
+## 概要
+
+本ドキュメントでは、本プロジェクトにおけるロギングのベストプラクティスを定義します。適切なロギングは、システムの動作状況の把握、問題の診断、パフォーマンスの監視、セキュリティ監査などに不可欠です。このガイドラインに従うことで、一貫性のあるロギングを実現し、運用・保守の効率化を図ります。
+
+## 基本原則
+
+### ロギングの目的
+
+ロギングは以下の目的で行います：
+
+1. **問題の診断と解決**: エラーや例外の発生時に、原因特定と解決に必要な情報を提供する
+2. **システム動作の監視**: システムの状態や動作を継続的に監視し、異常を検知する
+3. **パフォーマンスの測定**: 処理時間やリソース使用量を記録し、パフォーマンスを評価する
+4. **セキュリティ監査**: セキュリティ関連のイベントを記録し、不正アクセスや攻撃を検知する
+5. **ユーザー行動の分析**: ユーザーの操作や行動パターンを分析し、UX改善に活用する
+
+### ロギングの原則
+
+1. **一貫性**: 全てのコンポーネントで一貫したロギング方法を使用する
+2. **関連性**: 必要な情報のみをログに記録し、ノイズを最小限に抑える
+3. **詳細度**: 適切なログレベルを使用し、状況に応じた詳細度で記録する
+4. **構造化**: 検索や分析が容易な構造化されたフォーマットでログを記録する
+5. **コンテキスト**: ログメッセージには十分なコンテキスト情報を含める
+6. **セキュリティ**: 機密情報やPIIをログに記録しない
+7. **パフォーマンス**: ロギング自体がシステムパフォーマンスに大きな影響を与えないようにする
+
+## ログレベル
+
+以下のログレベルを使用し、適切な状況で各レベルを使い分けます：
+
+### TRACE
+
+- 最も詳細なレベル
+- 開発時のデバッグ目的でのみ使用
+- 本番環境では通常無効
+- 例：関数の入出力値、ループの反復状況など
+
+```python
+logger.trace(f"関数 calculate_total の入力値: items={items}, discount={discount}")
+```
+
+### DEBUG
+
+- 開発者向けの詳細情報
+- 問題のデバッグに役立つ情報
+- 本番環境では通常無効
+- 例：変数の値、処理の詳細な流れなど
+
+```python
+logger.debug(f"ユーザー検索クエリのパラメータ: {search_params}")
+```
+
+### INFO
+
+- システムの正常な動作を示す情報
+- 重要なイベントや状態変化
+- 本番環境でも有効
+- 例：アプリケーションの起動/停止、重要な処理の開始/完了など
+
+```python
+logger.info(f"アプリケーションが起動しました。バージョン: {app_version}")
+logger.info(f"ユーザー {user_id} がログインしました。IP: {ip_address}")
+```
+
+### WARNING
+
+- 潜在的な問題や注意が必要な状況
+- すぐに対応が必要ではないが、監視すべき状況
+- 例：非推奨APIの使用、パフォーマンス低下の兆候など
+
+```python
+logger.warning(f"データベース接続プールが80%使用されています。現在の接続数: {connection_count}")
+```
+
+### ERROR
+
+- エラーが発生したが、アプリケーションは動作を継続できる状況
+- 調査と対応が必要な問題
+- 例：リクエスト処理の失敗、外部サービス連携の失敗など
+
+```python
+logger.error(f"ユーザー {user_id} のプロフィール更新に失敗しました。エラー: {str(error)}")
+```
+
+### CRITICAL / FATAL
+
+- システムの重大な障害
+- 即時対応が必要な致命的な問題
+- アプリケーションの動作継続が困難な状況
+- 例：データベース接続の喪失、重要なサービスの停止など
+
+```python
+logger.critical(f"データベース接続が失われました。再接続を試みます。エラー: {str(error)}", exc_info=True)
+```
+
+### ログレベルの使い分け
+
+| 環境 | TRACE | DEBUG | INFO | WARNING | ERROR | CRITICAL |
+|------|-------|-------|------|---------|-------|----------|
+| 開発 | 有効 | 有効 | 有効 | 有効 | 有効 | 有効 |
+| テスト | 無効 | 有効 | 有効 | 有効 | 有効 | 有効 |
+| ステージング | 無効 | 無効 | 有効 | 有効 | 有効 | 有効 |
+| 本番 | 無効 | 無効 | 有効 | 有効 | 有効 | 有効 |
+
+## ログフォーマット
+
+### 構造化ログ
+
+JSON形式の構造化ログを使用し、検索や分析を容易にします：
+
+```json
+{
+  "timestamp": "2023-05-15T08:12:34.567Z",
+  "level": "INFO",
+  "logger": "app.auth.service",
+  "message": "ユーザーがログインしました",
+  "context": {
+    "user_id": "user-123",
+    "ip_address": "192.168.1.1",
+    "user_agent": "Mozilla/5.0 ...",
+    "request_id": "req-456"
+  },
+  "service": "auth-service",
+  "environment": "production",
+  "version": "1.2.3"
+}
+```
+
+### 必須フィールド
+
+すべてのログエントリには以下のフィールドを含めます：
+
+| フィールド | 説明 | 例 |
+|-----------|------|-----|
+| timestamp | ISO 8601形式のタイムスタンプ | "2023-05-15T08:12:34.567Z" |
+| level | ログレベル | "INFO", "ERROR" |
+| logger | ロガー名（通常はモジュール名） | "app.auth.service" |
+| message | ログメッセージ | "ユーザーがログインしました" |
+| service | サービス名 | "auth-service" |
+| environment | 環境名 | "production" |
+| version | アプリケーションバージョン | "1.2.3" |
+
+## セキュリティとプライバシー
+
+### ログに記録してはいけない情報
+
+以下の情報はログに記録しないでください：
+
+1. **パスワード**: 平文、ハッシュ値を問わず、パスワードは記録しない
+2. **認証トークン**: JWTやAPIキーなどの認証情報
+3. **個人を特定できる情報（PII）**: 
+   - 氏名（フルネーム）
+   - メールアドレス
+   - 電話番号
+   - 住所
+   - クレジットカード番号
+   - 社会保障番号
+4. **機密情報**: 
+   - 企業の機密情報
+   - 契約情報
+   - 財務情報
+
+### 情報のマスキング
+
+ログに記録する必要がある場合は、以下のようにマスキングします：
+
+1. **部分的なマスキング**: 
+   - メールアドレス: `u***@example.com`
+   - 電話番号: `090-****-1234`
+2. **ハッシュ化**: 
+   - ユーザーIDなどの識別子をハッシュ化して記録
+3. **トークン化**: 
+   - 実際の値の代わりに、一時的なトークンを使用
+
+### コンプライアンス
+
+ログ収集と保存は、以下の法規制に準拠する必要があります：
+
+1. **GDPR**: EU圏のユーザーデータを扱う場合
+2. **CCPA**: カリフォルニア州のユーザーデータを扱う場合
+3. **個人情報保護法**: 日本国内のユーザーデータを扱う場合
+
+## 参考資料
+
+- [The Twelve-Factor App: Logs](https://12factor.net/logs)
+- [OWASP Logging Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html)
+- [Google Cloud Logging Best Practices](https://cloud.google.com/logging/docs/best-practices)
+- [Elastic Common Schema (ECS)](https://www.elastic.co/guide/en/ecs/current/index.html)
+
+## Cloud Logging 連携
+
+### 導入概要
+
+- バックエンドは `google-cloud-logging` を利用して GCP の Cloud Logging へ構造化ログを送信する
+- Cloud Logging を利用できない環境（認証情報がないローカル等）では JSON フォーマットされた標準出力ログに自動フォールバックする
+- ログの初期化は `app/utils/logger.py` の `setup_logging()` で集約
+- FastAPI 起動時に `app/main.py` から `setup_logging()` を呼び出し、uvicorn ログも統合
+
+### 依存モジュール
+
+`pyproject.toml` のランタイム依存関係に以下を追加する：
+
+- `google-cloud-logging`
+
+### 設定フロー
+
+1. `setup_logging()` をアプリ起動前に 1 度だけ呼び出す
+   - `app_env`: `APP_ENV` 環境変数の値（development/test/staging/production 想定）
+   - `service_name`: Cloud Logging の `service` フィールドに入る識別子（例: `katana-backend-api`）
+   - `log_level`: `LOG_LEVEL` 環境変数から取得
+   - `service_version`: FastAPI アプリのバージョン（例: `0.1.0`）
+   - `labels`: Cloud Logging の追加ラベル。`{"component": "fastapi"}` など
+2. Google Cloud の認証情報を検出できれば `CloudLoggingHandler` + `StructuredLogHandler` を設定
+   - 認証情報検出順序: `GOOGLE_CLOUD_PROJECT` 等の環境変数 → `google.auth.default()`
+3. 認証情報が無い場合は `JsonFormatter` による標準出力 JSON ログへフォールバック
+4. `RequestMiddleware.install(service=service_name)` が呼ばれ、GCP のトレースコンテキスト情報が Starlette/uvicorn から伝搬可能になる
+5. `uvicorn`, `uvicorn.error`, `uvicorn.access` ロガーのハンドラを削除し、ルートロガーに伝搬させて一元的に収集
+
+### ローカル実行時のポイント
+
+- 認証情報なしで `uv run uvicorn app.main:app --reload` などを起動すると、構造化 JSON の標準出力ログが発生
+- テスト (`uv run pytest`) 実行時も自動でフォールバック動作する
+
+### デプロイ時の注意
+
+- Cloud Run 等で実行する場合は、サービス アカウントに `roles/logging.logWriter` が付与されていることを確認
+- 追加ラベル/コンテキスト (`service`, `environment`, `version`) が Cloud Logging のフィールドとして利用可能
+
+### トラブルシューティング
+
+| 症状 | 原因 | 対応 |
+|------|------|------|
+| Cloud Logging にログが出ない | 認証情報が見つからずフォールバックしている | `GOOGLE_APPLICATION_CREDENTIALS` や `GOOGLE_CLOUD_PROJECT` を設定する。フォールバックログで `service` フィールドが JSON に含まれていれば設定自体は成功している |
+| `DefaultCredentialsError` が発生 | サービス アカウント権限不足、または認証情報のファイルパス誤り | Cloud Run の実行サービスアカウントに `logWriter` 権限を追加、もしくは認証ファイルパスを修正 |
+| ログが二重に出力される | 既存ハンドラが残っている | `setup_logging()` 前に別のハンドラ設定を行わない。`setup_logging()` 内で `root_logger.handlers.clear()` していることを確認 |
+| テストで `async with self.db.begin()` が失敗する | Mock セッションが非同期コンテキストマネージャーを返していない | `tests/conftest.py` の `mock_db_session.begin` が `_mock_transaction` を返すようにする |
