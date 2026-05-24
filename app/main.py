@@ -2,12 +2,15 @@ import logging
 
 from fastapi import FastAPI
 
-from app.api.routes.line import router as line_router
+from app.api.v1.endpoints.line import router as line_router
 from app.core.config import get_settings
-from app.core.logging import configure_logging
+from app.utils.logger import setup_logging
 
 settings = get_settings()
-configure_logging(settings)
+setup_logging(
+    app_env=settings.app_env,
+    log_level=settings.app_log_level,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,4 +30,3 @@ async def health() -> dict[str, str]:
 @app.on_event("startup")
 async def on_startup() -> None:
     logger.info("Application started", extra={"app_env": settings.app_env})
-

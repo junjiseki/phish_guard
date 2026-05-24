@@ -208,8 +208,6 @@ JSON形式の構造化ログを使用し、検索や分析を容易にします�
 
 `pyproject.toml` のランタイム依存関係に以下を追加する：
 
-- `google-cloud-logging`
-
 ### 設定フロー
 
 1. `setup_logging()` をアプリ起動前に 1 度だけ呼び出す
@@ -233,12 +231,3 @@ JSON形式の構造化ログを使用し、検索や分析を容易にします�
 
 - Cloud Run 等で実行する場合は、サービス アカウントに `roles/logging.logWriter` が付与されていることを確認
 - 追加ラベル/コンテキスト (`service`, `environment`, `version`) が Cloud Logging のフィールドとして利用可能
-
-### トラブルシューティング
-
-| 症状 | 原因 | 対応 |
-|------|------|------|
-| Cloud Logging にログが出ない | 認証情報が見つからずフォールバックしている | `GOOGLE_APPLICATION_CREDENTIALS` や `GOOGLE_CLOUD_PROJECT` を設定する。フォールバックログで `service` フィールドが JSON に含まれていれば設定自体は成功している |
-| `DefaultCredentialsError` が発生 | サービス アカウント権限不足、または認証情報のファイルパス誤り | Cloud Run の実行サービスアカウントに `logWriter` 権限を追加、もしくは認証ファイルパスを修正 |
-| ログが二重に出力される | 既存ハンドラが残っている | `setup_logging()` 前に別のハンドラ設定を行わない。`setup_logging()` 内で `root_logger.handlers.clear()` していることを確認 |
-| テストで `async with self.db.begin()` が失敗する | Mock セッションが非同期コンテキストマネージャーを返していない | `tests/conftest.py` の `mock_db_session.begin` が `_mock_transaction` を返すようにする |

@@ -5,15 +5,14 @@ import logging
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Literal
+from typing import Any
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import ValidationError
 
 from app.core.config import Settings, get_settings
+from app.schemas.analysis import PhishingAnalysis
 
 logger = logging.getLogger(__name__)
-
-RiskLevel = Literal["low", "medium", "high"]
 
 ANALYSIS_PROMPT = """
 あなたはフィッシング詐欺と詐欺SMS/メールの判定を支援するセキュリティ分析AIです。
@@ -49,13 +48,6 @@ FALLBACK_ANALYSIS = {
         "個人情報、認証コード、支払い情報を入力しないでください。",
     ],
 }
-
-
-class PhishingAnalysis(BaseModel):
-    risk_level: RiskLevel
-    summary: str = Field(min_length=1, max_length=200)
-    reasons: list[str] = Field(default_factory=list, max_length=3)
-    actions: list[str] = Field(default_factory=list, max_length=3)
 
 
 class GeminiAnalysisService:

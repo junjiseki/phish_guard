@@ -1,6 +1,6 @@
 from typing import Protocol
 
-from app.services.analysis_service import RiskLevel
+from app.schemas.analysis import RiskLevel
 
 
 class AnalysisResult(Protocol):

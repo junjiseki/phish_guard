@@ -12,7 +12,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.core.config import Settings, get_settings
-from app.services.analysis_service import PhishingAnalysis, analyze_phishing_image
+from app.schemas.analysis import PhishingAnalysis
+from app.services.analysis_service import analyze_phishing_image
 from app.services.message_builder import build_line_reply
 
 logger = logging.getLogger(__name__)

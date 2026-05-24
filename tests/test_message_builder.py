@@ -1,4 +1,4 @@
-from app.services.analysis_service import PhishingAnalysis
+from app.schemas.analysis import PhishingAnalysis
 from app.services.message_builder import build_line_reply
 
 

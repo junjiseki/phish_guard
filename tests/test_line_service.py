@@ -6,7 +6,7 @@ import hmac
 import pytest
 
 from app.core.config import Settings
-from app.services.analysis_service import PhishingAnalysis
+from app.schemas.analysis import PhishingAnalysis
 from app.services.line_service import (
     NON_IMAGE_REPLY_MESSAGE,
     LineContentFetchError,

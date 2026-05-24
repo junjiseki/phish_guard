@@ -1,7 +1,8 @@
-from typing import Any
+"""LINE Webhook エンドポイント。"""
 
 from fastapi import APIRouter, HTTPException, Request, status
 
+from app.schemas.line import LineWebhookResponse
 from app.services.line_service import (
     LINE_SIGNATURE_HEADER,
     LineSignatureError,
@@ -12,8 +13,12 @@ from app.services.line_service import (
 router = APIRouter(prefix="/line", tags=["line"])
 
 
-@router.post("/webhook", status_code=status.HTTP_200_OK)
-async def line_webhook(request: Request) -> dict[str, Any]:
+@router.post(
+    "/webhook",
+    status_code=status.HTTP_200_OK,
+    response_model=LineWebhookResponse,
+)
+async def line_webhook(request: Request) -> LineWebhookResponse:
     """Receive LINE webhook events without logging user message contents."""
     body = await request.body()
     signature = request.headers.get(LINE_SIGNATURE_HEADER)
@@ -26,6 +31,6 @@ async def line_webhook(request: Request) -> dict[str, Any]:
             detail="Invalid LINE signature",
         ) from exc
     except LineWebhookError:
-        return {"status": "ok"}
+        return LineWebhookResponse(status="ok")
 
-    return {"status": "ok"}
+    return LineWebhookResponse(status="ok")

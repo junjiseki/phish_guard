@@ -41,6 +41,9 @@ LINEで受け取ったSMSやメールのスクリーンショット画像をAI�
 │   ├── core
 │   │   ├── config.py                # 環境変数の読み込み
 │   │   └── logging.py               # ログ設定
+|   ├── schemas/                     # Pydantic スキーマ
+│   |   ├── analysis.py
+│   |   └── line.py
 │   ├── services
 │   │   ├── analysis_service.py      # Gemini APIで画像解析
 │   │   ├── line_service.py          # LINE署名検証、画像取得、返信
