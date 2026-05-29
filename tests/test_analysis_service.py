@@ -69,3 +69,16 @@ def test_extract_gemini_text_returns_candidate_text() -> None:
         )
         == '{"risk_level":"low"}'
     )
+
+
+def test_analysis_prompt_prioritizes_official_sender_email_domain() -> None:
+    service = GeminiAnalysisService(Settings(GEMINI_API_KEY="dummy"))
+
+    request_body = service._build_request_body(b"image-bytes", "image/png")
+    prompt = request_body["contents"][0]["parts"][0]["text"]
+
+    assert "表示名ではなくメールアドレスのドメインを重視する" in prompt
+    assert "正規ドメインと" in prompt
+    assert "一致する場合" in prompt
+    assert "ポイント利用や割引で金額が" in prompt
+    assert "異なるだけでは危険扱いしない" in prompt
