@@ -94,10 +94,7 @@ class LineWebhookService:
         content = await self.get_message_content(message_id=message_id)
         validate_image_content(content, self.settings.max_image_bytes)
 
-        analysis = await self.analysis_function(
-            image_bytes=content.body,
-            mime_type=content.mime_type,
-        )
+        analysis = await self.analysis_function(content.body, content.mime_type)
         return build_line_reply(analysis)
 
     async def get_message_content(self, message_id: str) -> "LineMessageContent":
