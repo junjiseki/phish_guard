@@ -11,13 +11,19 @@ class AnalysisResult(Protocol):
 
 
 RISK_HEADERS: dict[RiskLevel, str] = {
-    "low": "念のため確認してください",
+    "low": "安全レベル: 高",
+    "medium": "安全レベル: 中",
+    "high": "安全レベル: 低",
+}
+
+RISK_SUMMARIES: dict[RiskLevel, str] = {
+    "low": "安全な可能性が高いです",
     "medium": "少し注意が必要です",
     "high": "危険な可能性があります",
 }
 
 DEFAULT_REASONS: dict[RiskLevel, list[str]] = {
-    "low": ["今のところ強い危険な特徴は多くありません"],
+    "low": ["今のところ強い危険な特徴は見当たりません"],
     "medium": ["はっきり判断できないため注意が必要です"],
     "high": ["詐欺や偽の案内の可能性があります"],
 }
@@ -50,6 +56,7 @@ def build_line_reply(analysis: AnalysisResult) -> str:
     return "\n".join(
         [
             f"{risk_icon(risk_level)} {header}",
+            RISK_SUMMARIES[risk_level],
             "",
             "理由：",
             *format_items(reasons),
@@ -85,7 +92,7 @@ def format_items(items: list[str]) -> list[str]:
 
 def risk_icon(risk_level: RiskLevel) -> str:
     if risk_level == "high":
-        return "⚠️"
+        return "🚨"
     if risk_level == "medium":
         return "⚠️"
-    return "🔎"
+    return "👍"

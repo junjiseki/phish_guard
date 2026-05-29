@@ -82,3 +82,10 @@ def test_analysis_prompt_prioritizes_official_sender_email_domain() -> None:
     assert "一致する場合" in prompt
     assert "ポイント利用や割引で金額が" in prompt
     assert "異なるだけでは危険扱いしない" in prompt
+    assert "商品単価、合計金額、請求金額" in prompt
+    assert "クーポン、割引、ギフト券" in prompt
+    assert "金額差だけの場合" in prompt
+    assert "risk_level は\n  low にする" in prompt
+    assert "正規メールの可能性が高い" in prompt
+    assert "安全な可能性が高い" in prompt
+    assert "完全に安全です" in prompt

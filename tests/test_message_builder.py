@@ -28,9 +28,12 @@ def test_build_line_reply_changes_message_by_risk_level() -> None:
         ),
     )
 
-    assert "念のため確認してください" in low_reply
+    assert "安全レベル: 高" in low_reply
+    assert "安全な可能性が高いです" in low_reply
     assert "完全に安全" not in low_reply
+    assert "安全レベル: 中" in medium_reply
     assert "少し注意が必要です" in medium_reply
+    assert "安全レベル: 低" in high_reply
     assert "危険な可能性があります" in high_reply
     assert "URLは押さないでください" in high_reply
     assert "家族" in low_reply
