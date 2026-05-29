@@ -14,6 +14,10 @@ class Settings(BaseSettings):
         default="",
         alias="LINE_CHANNEL_ACCESS_TOKEN",
     )
+    line_signature_verification_enabled: bool = Field(
+        default=True,
+        alias="LINE_SIGNATURE_VERIFICATION_ENABLED",
+    )
 
     gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")
     gemini_model: str = Field(default="gemini-2.5-flash", alias="GEMINI_MODEL")

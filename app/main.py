@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 
 from app.api.v1.endpoints.line import router as line_router
 from app.core.config import get_settings
@@ -24,6 +24,13 @@ app.include_router(line_router)
 
 @app.get("/health")
 async def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.post("/callback")
+async def callback(request: Request) -> dict[str, str]:
+    body = await request.body()
+    print(body.decode())
     return {"status": "ok"}
 
 

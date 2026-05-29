@@ -32,12 +32,24 @@ LINEで受け取ったSMSやメールのスクリーンショット画像をAI�
 
 ## ディレクトリ構成
 
+開発環境でCloudflare Tunnelを使ってLINE Webhookを確認する最小構成は次の通りです。
+
+```text
+app/
+  main.py
+README.md
+Makefile
+```
+
+現在のMVP全体の構成は次の通りです。
+
 ```text
 .
 ├── app
 │   ├── api
-│   │   └── routes
-│   │       └── line.py              # LINE Webhookの入口
+│   │   └── v1
+│   │       └── endpoints
+│   │           └── line.py          # LINE Webhookの本実装
 │   ├── core
 │   │   ├── config.py                # 環境変数の読み込み
 │   │   └── logging.py               # ログ設定
@@ -54,6 +66,7 @@ LINEで受け取ったSMSやメールのスクリーンショット画像をAI�
 │   ├── test_line_service.py
 │   └── test_message_builder.py
 ├── .env.example
+├── Makefile
 ├── docker-compose.yml
 ├── Dockerfile
 ├── pyproject.toml
@@ -75,6 +88,7 @@ cp .env.example .env
 | `APP_LOG_LEVEL` | 任意 | ログレベル。例: `INFO` |
 | `LINE_CHANNEL_SECRET` | 必須 | LINE DevelopersのChannel secret |
 | `LINE_CHANNEL_ACCESS_TOKEN` | 必須 | LINE DevelopersのChannel access token |
+| `LINE_SIGNATURE_VERIFICATION_ENABLED` | 任意 | LINE署名検証を有効にするか。既定値は `true`。curlやCloudflare Tunnelの疎通確認だけなら一時的に `false` にできます |
 | `GEMINI_API_KEY` | 必須 | Gemini APIキー |
 | `GEMINI_MODEL` | 任意 | 使用するGeminiモデル。既定値は `gemini-2.5-flash` |
 | `REQUEST_TIMEOUT_SECONDS` | 任意 | 外部APIへのタイムアウト秒数 |
@@ -87,14 +101,14 @@ cp .env.example .env
 3. Messaging API Channelを作成します。
 4. Channel basic settingsで `Channel secret` を確認し、`.env` の `LINE_CHANNEL_SECRET` に設定します。
 5. Messaging API settingsで `Channel access token` を発行し、`.env` の `LINE_CHANNEL_ACCESS_TOKEN` に設定します。
-6. Webhook URLを設定します。ローカル検証ではngrokのURLを使います。
+6. Webhook URLを設定します。ローカル検証ではCloudflare TunnelのURLを使います。
 7. `Use webhook` を有効にします。
 8. LINE公式アカウントを友だち追加し、画像を送れる状態にします。
 
 Webhook URLの例:
 
 ```text
-https://example.ngrok-free.app/line/webhook
+https://xxxxx.trycloudflare.com/callback
 ```
 
 ## OpenAI APIキー設定
@@ -121,7 +135,7 @@ uv sync
 FastAPIを起動します。
 
 ```bash
-uv run uvicorn app.main:app --reload
+uv run python -m uvicorn app.main:app --reload
 ```
 
 起動確認:
@@ -142,20 +156,64 @@ Dockerで起動する場合:
 docker compose up --build
 ```
 
-## ngrokでのWebhook検証方法
+Makefileを使う場合:
 
-LINE DevelopersからローカルPCへWebhookを送るには、ngrokなどでローカルサーバーを外部公開します。
+```bash
+make run
+```
+
+## Cloudflare TunnelでのWebhook検証方法
+
+LINE DevelopersからローカルPCへWebhookを送るには、Cloudflare TunnelでローカルサーバーをHTTPS公開します。
+
+Quick Tunnelは開発用途向けです。URLは起動するたびに変わります。本番運用では固定URLを使えるNamed Tunnelを推奨します。HTTPS/TLSはCloudflare側で自動対応されます。
+
+### cloudflaredのインストール
+
+macOSではHomebrewでインストールします。
+
+```bash
+brew install cloudflared
+```
+
+インストール確認:
+
+```bash
+cloudflared --version
+```
+
+### Quick Tunnelでlocalhost:8000を公開する
+
+まず疎通だけ確認したい場合は、`.env` で署名検証を一時的に無効化できます。`/callback` の最小サンプルは署名検証を行わず、リクエストbodyをログ出力して `200 OK` を返します。
+
+```env
+LINE_SIGNATURE_VERIFICATION_ENABLED=false
+```
+
+注意: 本番運用や実際のLINE連携確認では `true` に戻し、`LINE_CHANNEL_SECRET` を必ず設定してください。
 
 1. FastAPIを起動します。
 
 ```bash
-uv run uvicorn app.main:app --reload
+uv run python -m uvicorn app.main:app --reload
 ```
 
-2. 別のターミナルでngrokを起動します。
+Makefileを使う場合:
 
 ```bash
-ngrok http 8000
+make run
+```
+
+2. 別のターミナルでCloudflare Quick Tunnelを起動します。
+
+```bash
+cloudflared tunnel --url http://localhost:8000
+```
+
+Makefileを使う場合:
+
+```bash
+make tunnel
 ```
 
 3. 表示されたHTTPS URLをコピーします。
@@ -163,20 +221,131 @@ ngrok http 8000
 例:
 
 ```text
-https://example.ngrok-free.app
+https://xxxxx.trycloudflare.com
 ```
 
 4. LINE DevelopersのWebhook URLに次を設定します。
 
 ```text
-https://example.ngrok-free.app/line/webhook
+https://xxxxx.trycloudflare.com/callback
 ```
 
-5. `Verify` を押して接続確認します。
+5. ローカルから疎通確認します。
 
-6. LINE公式アカウントにSMSやメールのスクリーンショット画像を送ります。
+```bash
+curl -i http://localhost:8000/health
+```
 
-7. 危険度、理由、対応方法がLINEに返信されれば成功です。
+次のように `200 OK` が返ればFastAPIは起動しています。
+
+```text
+HTTP/1.1 200 OK
+```
+
+Webhookエンドポイントをローカルで確認します。
+
+```bash
+curl -i -X POST http://localhost:8000/callback \
+  -H "Content-Type: application/json" \
+  -d '{"destination":"local-check","events":[]}'
+```
+
+Cloudflare Tunnel経由でも確認します。
+
+```bash
+curl -i -X POST https://xxxxx.trycloudflare.com/callback \
+  -H "Content-Type: application/json" \
+  -d '{"destination":"cloudflare-check","events":[]}'
+```
+
+どちらも次のように `200 OK` が返れば、LINE Developersから到達できる準備ができています。
+
+```text
+HTTP/1.1 200 OK
+```
+
+6. ブラウザで次のURLを開き、FastAPIがngrok経由で見えていることを確認します。
+
+```text
+https://xxxxx.trycloudflare.com/health
+```
+
+`/callback` はPOST専用なので、ブラウザで開くと `405 Method Not Allowed` になる場合があります。これは正常です。
+
+7. LINE DevelopersでWebhook verificationを確認します。
+
+LINE Developers Consoleで対象のMessaging API Channelを開き、Messaging API settingsのWebhook URLに `https://xxxxx.trycloudflare.com/callback` を設定します。その後、`Verify` を押します。
+
+FastAPIのターミナルにLINEから送られたrequest bodyが表示され、LINE Developers側で成功表示になれば疎通確認は完了です。
+
+8. LINE公式アカウントにSMSやメールのスクリーンショット画像を送ります。
+
+9. 危険度、理由、対応方法がLINEに返信されれば成功です。
+
+Verifyやcurl確認が終わったら、署名検証を有効に戻します。
+
+```env
+LINE_SIGNATURE_VERIFICATION_ENABLED=true
+```
+
+### FastAPIのWebhook最小サンプル
+
+[app/main.py](app/main.py) にはCloudflare Tunnelの疎通確認用に次のエンドポイントがあります。
+
+```python
+from fastapi import FastAPI, Request
+
+app = FastAPI()
+
+
+@app.post("/callback")
+async def callback(request: Request):
+    body = await request.body()
+    print(body.decode())
+    return {"status": "ok"}
+```
+
+実際のアプリでは既存のFastAPIアプリに `/callback` を追加しています。
+
+## Cloudflare Tunnel Troubleshooting
+
+### LINE Verify が失敗する
+
+- Webhook URLが `https://xxxxx.trycloudflare.com/callback` になっているか確認します。
+- `http://` ではなく `https://` を使います。
+- FastAPIが `localhost:8000` で起動しているか確認します。
+- `curl -i -X POST https://xxxxx.trycloudflare.com/callback ...` が `200 OK` を返すか確認します。
+- `curl: (6) Could not resolve host: xxxxx.trycloudflare.com` が出る場合は、そのQuick Tunnel URLが無効になっている可能性が高いです。`cloudflared tunnel --url http://localhost:8000` を起動し直し、新しく表示されたURLを使ってください。
+- `/callback` はPOST専用です。ブラウザで開いた結果だけで判断しないでください。
+
+### 502 エラー
+
+- FastAPIが停止している可能性があります。`make run` または `uv run python -m uvicorn app.main:app --reload` で起動してください。
+- Cloudflare Tunnelの転送先が `http://localhost:8000` になっているか確認します。
+- ポート番号を変えた場合は、`cloudflared tunnel --url http://localhost:<port>` も合わせて変更します。
+
+### localhost 接続失敗
+
+- `curl -i http://localhost:8000/health` を実行して `200 OK` が返るか確認します。
+- 既に別プロセスが8000番ポートを使っていないか確認します。
+- Dockerで起動している場合は、コンテナが8000番ポートを公開しているか確認します。
+
+### tunnel URL が毎回変わる
+
+- Quick TunnelのURLは起動するたびに変わります。開発用として毎回LINE DevelopersのWebhook URLを更新してください。
+- `cloudflared` を停止した、ターミナルを閉じた、PCがスリープした、ネットワークが切り替わった場合は、以前の `https://xxxxx.trycloudflare.com` が名前解決できなくなることがあります。
+- `curl: (6) Could not resolve host` が出たら、古いURLを使っていないか確認し、Quick Tunnelを起動し直して新しいURLに差し替えます。
+- 固定URLが必要な場合は、本番や継続開発用にNamed Tunnelを使います。
+
+### cloudflared command not found
+
+- Homebrewでインストールします。
+
+```bash
+brew install cloudflared
+```
+
+- インストール後にシェルを開き直すか、PATHが通っているか確認します。
 
 ## テスト実行方法
 

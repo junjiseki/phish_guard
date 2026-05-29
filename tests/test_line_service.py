@@ -11,6 +11,7 @@ from app.services.line_service import (
     NON_IMAGE_REPLY_MESSAGE,
     LineContentFetchError,
     LineMessageContent,
+    LineSignatureError,
     LineWebhookService,
     parse_line_events,
     validate_image_content,
@@ -40,6 +41,29 @@ def test_verify_line_signature_rejects_invalid_signature() -> None:
     assert not verify_line_signature(body, "bad-signature", "secret")
     assert not verify_line_signature(body, None, "secret")
     assert not verify_line_signature(body, "bad-signature", "")
+
+
+def test_handle_webhook_rejects_missing_signature_by_default() -> None:
+    service = LineWebhookService(
+        Settings(
+            LINE_CHANNEL_SECRET="secret",
+            LINE_SIGNATURE_VERIFICATION_ENABLED=True,
+        ),
+    )
+
+    with pytest.raises(LineSignatureError):
+        asyncio.run(service.handle_webhook(body=b'{"events":[]}', signature=None))
+
+
+def test_handle_webhook_can_skip_signature_for_local_ngrok_check() -> None:
+    service = LineWebhookService(
+        Settings(
+            LINE_CHANNEL_SECRET="",
+            LINE_SIGNATURE_VERIFICATION_ENABLED=False,
+        ),
+    )
+
+    asyncio.run(service.handle_webhook(body=b'{"events":[]}', signature=None))
 
 
 def test_non_image_message_returns_guidance_text() -> None:

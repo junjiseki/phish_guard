@@ -53,12 +53,15 @@ class LineWebhookService:
         self.analysis_function = analysis_function
 
     async def handle_webhook(self, body: bytes, signature: str | None) -> None:
-        if not verify_line_signature(
-            body=body,
-            signature=signature,
-            channel_secret=self.settings.line_channel_secret,
-        ):
-            raise LineSignatureError
+        if self.settings.line_signature_verification_enabled:
+            if not verify_line_signature(
+                body=body,
+                signature=signature,
+                channel_secret=self.settings.line_channel_secret,
+            ):
+                raise LineSignatureError
+        else:
+            logger.warning("LINE signature verification is disabled")
 
         for event in parse_line_events(body):
             await self._handle_event(event)
