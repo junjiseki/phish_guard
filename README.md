@@ -67,6 +67,12 @@ Makefile
 │   └── test_message_builder.py
 ├── .env.example
 ├── Makefile
+├── terraform
+│   ├── main.tf                      # Cloud Run / Artifact Registry
+│   ├── outputs.tf                   # デプロイ後のURL出力
+│   ├── variables.tf                 # Terraform変数
+│   ├── versions.tf                  # Terraform provider設定
+│   └── terraform.tfvars.example     # 変数サンプル
 ├── docker-compose.yml
 ├── Dockerfile
 ├── pyproject.toml
@@ -346,6 +352,113 @@ brew install cloudflared
 ```
 
 - インストール後にシェルを開き直すか、PATHが通っているか確認します。
+
+## Cloud RunをTerraformで構築する
+
+開発環境をCloud RunへデプロイするTerraformコードは [terraform](terraform) にあります。
+
+作成する主なリソース:
+
+- Artifact Registry Docker repository
+- Cloud Run service
+- Cloud Run runtime service account
+- Secret Manager secrets
+- Cloud Run public invoker IAM
+- 必要なGoogle Cloud APIの有効化
+
+LINE Webhookから呼び出すため、既定ではCloud Runを未認証公開します。
+
+### 前提コマンド
+
+```bash
+gcloud auth login
+gcloud auth application-default login
+gcloud config set project YOUR_PROJECT_ID
+```
+
+Terraformの変数ファイルを作成します。
+
+```bash
+cp terraform/terraform.tfvars.example terraform/terraform.tfvars
+```
+
+`terraform/terraform.tfvars` の `project_id` と `image` を自分のGoogle Cloud projectに合わせます。
+
+機密値をTerraform変数に入れると、Terraform stateにも保存されます。開発用途では簡単ですが、本番ではSecret Managerの値をTerraform外で管理することを推奨します。
+
+### Artifact Registryを先に作成する
+
+初回はDocker imageのpush先が必要なので、Artifact Registryだけ先に作成します。
+
+```bash
+cd terraform
+terraform init
+terraform apply \
+  -target=google_project_service.required \
+  -target=google_artifact_registry_repository.docker
+```
+
+### Docker imageをbuildしてpushする
+
+```bash
+cd ..
+gcloud auth configure-docker asia-northeast1-docker.pkg.dev
+docker build -t asia-northeast1-docker.pkg.dev/YOUR_PROJECT_ID/phish-guard/phish-guard-api:latest .
+docker push asia-northeast1-docker.pkg.dev/YOUR_PROJECT_ID/phish-guard/phish-guard-api:latest
+```
+
+`terraform/terraform.tfvars` の `image` に同じimage URIを設定します。
+
+### Cloud Runを作成する
+
+```bash
+cd terraform
+terraform apply
+```
+
+完了後、次のoutputが表示されます。
+
+```text
+cloud_run_service_url
+line_webhook_callback_url
+line_webhook_url
+```
+
+LINE DevelopersのWebhook URLには、本実装を使う場合は次を設定します。
+
+```text
+https://xxxxx.a.run.app/line/webhook
+```
+
+疎通確認用の `/callback` を使う場合は次を設定します。
+
+```text
+https://xxxxx.a.run.app/callback
+```
+
+### 動作確認
+
+```bash
+curl -i https://xxxxx.a.run.app/health
+```
+
+疎通確認用:
+
+```bash
+curl -i -X POST https://xxxxx.a.run.app/callback \
+  -H "Content-Type: application/json" \
+  -d '{"destination":"cloud-run-check","events":[]}'
+```
+
+本実装のLINE Webhook:
+
+```bash
+curl -i -X POST https://xxxxx.a.run.app/line/webhook \
+  -H "Content-Type: application/json" \
+  -d '{"destination":"cloud-run-check","events":[]}'
+```
+
+署名検証が有効な場合、`/line/webhook` はLINE署名なしのcurlを `400` で拒否します。Cloud Runの疎通だけ確認したい場合は `/callback` を使ってください。
 
 ## テスト実行方法
 

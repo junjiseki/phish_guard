@@ -7,4 +7,10 @@ __pycache__/
 .mypy_cache/
 dist/
 build/
-
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+crash.log
+crash.*.log
