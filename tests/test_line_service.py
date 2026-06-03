@@ -9,18 +9,23 @@ from app.core.config import Settings
 from app.schemas.analysis import PhishingAnalysis
 from app.services.line_service import (
     DAILY_USER_REQUEST_LIMIT,
+    HTTP_STATUS_BAD_REQUEST,
+    HTTP_STATUS_OK,
+    INVALID_LINE_SIGNATURE_DETAIL,
     NON_IMAGE_REPLY_MESSAGE,
     REQUEST_LIMIT_EXCEEDED_REPLY_MESSAGE,
     DailyUserRequestLimiter,
     LineContentFetchError,
     LineMessageContent,
-    LineSignatureError,
     LineWebhookService,
     extract_line_user_id,
     parse_line_events,
     validate_image_content,
     verify_line_signature,
 )
+
+HTTP_STATUS_BAD_REQUEST_EXPECTED = HTTP_STATUS_BAD_REQUEST
+HTTP_STATUS_OK_EXPECTED = HTTP_STATUS_OK
 
 
 def build_signature(body: bytes, channel_secret: str) -> str:
@@ -47,18 +52,6 @@ def test_verify_line_signature_rejects_invalid_signature() -> None:
     assert not verify_line_signature(body, "bad-signature", "")
 
 
-def test_handle_webhook_rejects_missing_signature_by_default() -> None:
-    service = LineWebhookService(
-        Settings(
-            LINE_CHANNEL_SECRET="secret",
-            LINE_SIGNATURE_VERIFICATION_ENABLED=True,
-        ),
-    )
-
-    with pytest.raises(LineSignatureError):
-        asyncio.run(service.handle_webhook(body=b'{"events":[]}', signature=None))
-
-
 def test_process_webhook_returns_400_for_invalid_signature() -> None:
     service = LineWebhookService(
         Settings(
@@ -71,8 +64,8 @@ def test_process_webhook_returns_400_for_invalid_signature() -> None:
         service.process_webhook(body=b'{"events":[]}', signature=None),
     )
 
-    assert result.http_status_code == 400
-    assert result.detail == "Invalid LINE signature"
+    assert result.http_status_code == HTTP_STATUS_BAD_REQUEST_EXPECTED
+    assert result.detail == INVALID_LINE_SIGNATURE_DETAIL
 
 
 def test_process_webhook_returns_ok_for_invalid_payload() -> None:
@@ -87,11 +80,11 @@ def test_process_webhook_returns_ok_for_invalid_payload() -> None:
         service.process_webhook(body=b"not-json", signature=None),
     )
 
-    assert result.http_status_code == 200
+    assert result.http_status_code == HTTP_STATUS_OK_EXPECTED
     assert result.status == "ok"
 
 
-def test_handle_webhook_can_skip_signature_for_local_ngrok_check() -> None:
+def test_process_webhook_returns_ok_without_signature_verification() -> None:
     service = LineWebhookService(
         Settings(
             LINE_CHANNEL_SECRET="",
@@ -99,7 +92,11 @@ def test_handle_webhook_can_skip_signature_for_local_ngrok_check() -> None:
         ),
     )
 
-    asyncio.run(service.handle_webhook(body=b'{"events":[]}', signature=None))
+    result = asyncio.run(
+        service.process_webhook(body=b'{"events":[]}', signature=None),
+    )
+
+    assert result.http_status_code == HTTP_STATUS_OK_EXPECTED
 
 
 def test_non_image_message_returns_guidance_text() -> None:
@@ -129,6 +126,30 @@ def test_daily_user_request_limiter_allows_only_configured_count() -> None:
     assert limiter.allow("another-user-id")
 
 
+def test_text_messages_do_not_consume_daily_limit() -> None:
+    replies: list[str] = []
+
+    async def fake_reply_text(reply_token: str, text: str) -> None:
+        replies.append(text)
+
+    service = LineWebhookService(
+        Settings(LINE_CHANNEL_SECRET="secret"),
+        request_limiter=DailyUserRequestLimiter(limit=1),
+    )
+    service.reply_text = fake_reply_text  # type: ignore[method-assign]
+
+    text_event = {
+        "replyToken": "reply-token",
+        "source": {"type": "user", "userId": "user-id"},
+        "message": {"type": "text", "id": "message-id", "text": "hello"},
+    }
+
+    asyncio.run(service._handle_event(text_event))
+    asyncio.run(service._handle_event(text_event))
+
+    assert replies == [NON_IMAGE_REPLY_MESSAGE, NON_IMAGE_REPLY_MESSAGE]
+
+
 def test_handle_event_returns_limit_message_after_daily_limit() -> None:
     replies: list[str] = []
 
@@ -136,34 +157,41 @@ def test_handle_event_returns_limit_message_after_daily_limit() -> None:
         assert reply_token
         replies.append(text)
 
+    async def fake_analysis(
+        image_bytes: bytes,
+        mime_type: str | None,
+    ) -> PhishingAnalysis:
+        return PhishingAnalysis(
+            risk_level="low",
+            summary="確認してください",
+            reasons=["特徴は限定的です"],
+            actions=["公式窓口で確認してください"],
+        )
+
+    async def fake_get_message_content(message_id: str) -> LineMessageContent:
+        return LineMessageContent(body=b"image", mime_type="image/png")
+
     service = LineWebhookService(
         Settings(LINE_CHANNEL_SECRET="secret"),
+        analysis_function=fake_analysis,
         request_limiter=DailyUserRequestLimiter(limit=2),
     )
     service.reply_text = fake_reply_text  # type: ignore[method-assign]
+    service.get_message_content = fake_get_message_content  # type: ignore[method-assign]
 
-    event = {
+    image_event = {
         "replyToken": "reply-token",
-        "source": {
-            "type": "user",
-            "userId": "user-id",
-        },
-        "message": {
-            "type": "text",
-            "id": "message-id",
-            "text": "hello",
-        },
+        "source": {"type": "user", "userId": "user-id"},
+        "message": {"type": "image", "id": "message-id"},
     }
 
-    asyncio.run(service._handle_event(event))
-    asyncio.run(service._handle_event(event))
-    asyncio.run(service._handle_event(event))
+    asyncio.run(service._handle_event(image_event))
+    asyncio.run(service._handle_event(image_event))
+    asyncio.run(service._handle_event(image_event))
 
-    assert replies == [
-        NON_IMAGE_REPLY_MESSAGE,
-        NON_IMAGE_REPLY_MESSAGE,
-        REQUEST_LIMIT_EXCEEDED_REPLY_MESSAGE,
-    ]
+    assert replies[0] != REQUEST_LIMIT_EXCEEDED_REPLY_MESSAGE
+    assert replies[1] != REQUEST_LIMIT_EXCEEDED_REPLY_MESSAGE
+    assert replies[2] == REQUEST_LIMIT_EXCEEDED_REPLY_MESSAGE
 
 
 def test_extract_line_user_id_returns_user_source_id() -> None:

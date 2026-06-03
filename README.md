@@ -114,7 +114,7 @@ cp .env.example .env
 Webhook URLの例:
 
 ```text
-https://xxxxx.trycloudflare.com/callback
+https://xxxxx.trycloudflare.com/line/webhook
 ```
 
 ## OpenAI APIキー設定
@@ -190,7 +190,7 @@ cloudflared --version
 
 ### Quick Tunnelでlocalhost:8000を公開する
 
-まず疎通だけ確認したい場合は、`.env` で署名検証を一時的に無効化できます。`/callback` の最小サンプルは署名検証を行わず、リクエストbodyをログ出力して `200 OK` を返します。
+まず疎通だけ確認したい場合は、`.env` で署名検証を一時的に無効化できます。`/line/webhook` は空の `events` に対して `200 OK` を返します。
 
 ```env
 LINE_SIGNATURE_VERIFICATION_ENABLED=false
@@ -233,7 +233,7 @@ https://xxxxx.trycloudflare.com
 4. LINE DevelopersのWebhook URLに次を設定します。
 
 ```text
-https://xxxxx.trycloudflare.com/callback
+https://xxxxx.trycloudflare.com/line/webhook
 ```
 
 5. ローカルから疎通確認します。
@@ -251,7 +251,7 @@ HTTP/1.1 200 OK
 Webhookエンドポイントをローカルで確認します。
 
 ```bash
-curl -i -X POST http://localhost:8000/callback \
+curl -i -X POST http://localhost:8000/line/webhook \
   -H "Content-Type: application/json" \
   -d '{"destination":"local-check","events":[]}'
 ```
@@ -259,7 +259,7 @@ curl -i -X POST http://localhost:8000/callback \
 Cloudflare Tunnel経由でも確認します。
 
 ```bash
-curl -i -X POST https://xxxxx.trycloudflare.com/callback \
+curl -i -X POST https://xxxxx.trycloudflare.com/line/webhook \
   -H "Content-Type: application/json" \
   -d '{"destination":"cloudflare-check","events":[]}'
 ```
@@ -276,11 +276,11 @@ HTTP/1.1 200 OK
 https://xxxxx.trycloudflare.com/health
 ```
 
-`/callback` はPOST専用なので、ブラウザで開くと `405 Method Not Allowed` になる場合があります。これは正常です。
+`/line/webhook` はPOST専用なので、ブラウザで開くと `405 Method Not Allowed` になる場合があります。これは正常です。
 
 7. LINE DevelopersでWebhook verificationを確認します。
 
-LINE Developers Consoleで対象のMessaging API Channelを開き、Messaging API settingsのWebhook URLに `https://xxxxx.trycloudflare.com/callback` を設定します。その後、`Verify` を押します。
+LINE Developers Consoleで対象のMessaging API Channelを開き、Messaging API settingsのWebhook URLに `https://xxxxx.trycloudflare.com/line/webhook` を設定します。その後、`Verify` を押します。
 
 FastAPIのターミナルにLINEから送られたrequest bodyが表示され、LINE Developers側で成功表示になれば疎通確認は完了です。
 
@@ -294,35 +294,20 @@ Verifyやcurl確認が終わったら、署名検証を有効に戻します。
 LINE_SIGNATURE_VERIFICATION_ENABLED=true
 ```
 
-### FastAPIのWebhook最小サンプル
+### FastAPIのWebhookエンドポイント
 
-[app/main.py](app/main.py) にはCloudflare Tunnelの疎通確認用に次のエンドポイントがあります。
-
-```python
-from fastapi import FastAPI, Request
-
-app = FastAPI()
-
-
-@app.post("/callback")
-async def callback(request: Request):
-    body = await request.body()
-    print(body.decode())
-    return {"status": "ok"}
-```
-
-実際のアプリでは既存のFastAPIアプリに `/callback` を追加しています。
+本番・ローカル共通の Webhook は [app/api/v1/endpoints/line.py](app/api/v1/endpoints/line.py) の `POST /line/webhook` です。署名検証とイベント処理は service 層に集約しています。
 
 ## Cloudflare Tunnel Troubleshooting
 
 ### LINE Verify が失敗する
 
-- Webhook URLが `https://xxxxx.trycloudflare.com/callback` になっているか確認します。
+- Webhook URLが `https://xxxxx.trycloudflare.com/line/webhook` になっているか確認します。
 - `http://` ではなく `https://` を使います。
 - FastAPIが `localhost:8000` で起動しているか確認します。
-- `curl -i -X POST https://xxxxx.trycloudflare.com/callback ...` が `200 OK` を返すか確認します。
+- `curl -i -X POST https://xxxxx.trycloudflare.com/line/webhook ...` が `200 OK` を返すか確認します。
 - `curl: (6) Could not resolve host: xxxxx.trycloudflare.com` が出る場合は、そのQuick Tunnel URLが無効になっている可能性が高いです。`cloudflared tunnel --url http://localhost:8000` を起動し直し、新しく表示されたURLを使ってください。
-- `/callback` はPOST専用です。ブラウザで開いた結果だけで判断しないでください。
+- `/line/webhook` はPOST専用です。ブラウザで開いた結果だけで判断しないでください。
 
 ### 502 エラー
 
@@ -420,7 +405,6 @@ terraform apply
 
 ```text
 cloud_run_service_url
-line_webhook_callback_url
 line_webhook_url
 ```
 
@@ -430,27 +414,13 @@ LINE DevelopersのWebhook URLには、本実装を使う場合は次を設定し
 https://xxxxx.a.run.app/line/webhook
 ```
 
-疎通確認用の `/callback` を使う場合は次を設定します。
-
-```text
-https://xxxxx.a.run.app/callback
-```
-
 ### 動作確認
 
 ```bash
 curl -i https://xxxxx.a.run.app/health
 ```
 
-疎通確認用:
-
-```bash
-curl -i -X POST https://xxxxx.a.run.app/callback \
-  -H "Content-Type: application/json" \
-  -d '{"destination":"cloud-run-check","events":[]}'
-```
-
-本実装のLINE Webhook:
+LINE Webhook（署名検証を一時的に無効化している場合）:
 
 ```bash
 curl -i -X POST https://xxxxx.a.run.app/line/webhook \
@@ -458,7 +428,7 @@ curl -i -X POST https://xxxxx.a.run.app/line/webhook \
   -d '{"destination":"cloud-run-check","events":[]}'
 ```
 
-署名検証が有効な場合、`/line/webhook` はLINE署名なしのcurlを `400` で拒否します。Cloud Runの疎通だけ確認したい場合は `/callback` を使ってください。
+署名検証が有効な場合、`/line/webhook` はLINE署名なしの curl を `400` で拒否します。疎通確認だけ行う場合は `.env` で `LINE_SIGNATURE_VERIFICATION_ENABLED=false` にしてください。
 
 ## テスト実行方法
 

@@ -13,11 +13,6 @@ output "cloud_run_service_url" {
   value       = google_cloud_run_v2_service.api.uri
 }
 
-output "line_webhook_callback_url" {
-  description = "Webhook URL for the /callback development endpoint."
-  value       = "${google_cloud_run_v2_service.api.uri}/callback"
-}
-
 output "line_webhook_url" {
   description = "Webhook URL for the main LINE endpoint."
   value       = "${google_cloud_run_v2_service.api.uri}/line/webhook"

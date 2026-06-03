@@ -15,3 +15,9 @@ class LineWebhookProcessResult(BaseModel):
     status: str = "ok"
     http_status_code: int = 200
     detail: str | None = None
+
+
+class LineWebhookErrorResponse(BaseModel):
+    """LINE Webhook のエラーレスポンス。"""
+
+    detail: str

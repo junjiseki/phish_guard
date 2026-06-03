@@ -25,6 +25,9 @@ logger = logging.getLogger(__name__)
 LINE_SIGNATURE_HEADER = "x-line-signature"
 LINE_CONTENT_API_BASE_URL = "https://api-data.line.me/v2/bot/message"
 LINE_REPLY_API_URL = "https://api.line.me/v2/bot/message/reply"
+HTTP_STATUS_OK = 200
+HTTP_STATUS_BAD_REQUEST = 400
+INVALID_LINE_SIGNATURE_DETAIL = "Invalid LINE signature"
 DAILY_USER_REQUEST_LIMIT = 2
 DAILY_USER_REQUEST_LIMIT_TIMEZONE = "Asia/Tokyo"
 
@@ -115,24 +118,16 @@ class LineWebhookService:
         body: bytes,
         signature: str | None,
     ) -> LineWebhookProcessResult:
-        try:
-            await self.handle_webhook(body=body, signature=signature)
-        except LineSignatureError:
-            return LineWebhookProcessResult(
-                http_status_code=400,
-                detail="Invalid LINE signature",
-            )
-
-        return LineWebhookProcessResult()
-
-    async def handle_webhook(self, body: bytes, signature: str | None) -> None:
         if self.settings.line_signature_verification_enabled:
             if not verify_line_signature(
                 body=body,
                 signature=signature,
                 channel_secret=self.settings.line_channel_secret,
             ):
-                raise LineSignatureError
+                return LineWebhookProcessResult(
+                    http_status_code=HTTP_STATUS_BAD_REQUEST,
+                    detail=INVALID_LINE_SIGNATURE_DETAIL,
+                )
         else:
             logger.warning("LINE signature verification is disabled")
 
@@ -140,10 +135,21 @@ class LineWebhookService:
             events = parse_line_events(body)
         except LineWebhookError:
             logger.warning("LINE webhook payload is invalid")
-            return
+            return LineWebhookProcessResult()
 
+        asyncio.create_task(self._process_events(events))
+        return LineWebhookProcessResult()
+
+    async def _process_events(self, events: list[dict[str, Any]]) -> None:
         for event in events:
-            await self._handle_event(event)
+            try:
+                await self._handle_event(event)
+            except Exception as exc:
+                logger.warning(
+                    "LINE event processing failed: %s",
+                    type(exc).__name__,
+                    exc_info=True,
+                )
 
     async def _handle_event(self, event: dict[str, Any]) -> None:
         reply_token = event.get("replyToken")
@@ -151,14 +157,13 @@ class LineWebhookService:
             return
 
         try:
-            if not self._is_request_allowed(event):
-                reply_text = REQUEST_LIMIT_EXCEEDED_REPLY_MESSAGE
-                await self.reply_text(reply_token=reply_token, text=reply_text)
-                return
-
             reply_text = await self._build_reply_text(event)
         except Exception as exc:
-            logger.warning("LINE event handling failed: %s", type(exc).__name__)
+            logger.warning(
+                "LINE event handling failed: %s",
+                type(exc).__name__,
+                exc_info=True,
+            )
             reply_text = ERROR_REPLY_MESSAGE
 
         try:
@@ -177,6 +182,9 @@ class LineWebhookService:
         message = event.get("message")
         if not isinstance(message, dict) or message.get("type") != "image":
             return NON_IMAGE_REPLY_MESSAGE
+
+        if not self._is_request_allowed(event):
+            return REQUEST_LIMIT_EXCEEDED_REPLY_MESSAGE
 
         message_id = message.get("id")
         if not isinstance(message_id, str) or not message_id:
@@ -259,10 +267,6 @@ class LineMessageContent:
 
 
 class LineServiceError(Exception):
-    pass
-
-
-class LineSignatureError(LineServiceError):
     pass
 
 
