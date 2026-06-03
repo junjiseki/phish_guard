@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 
 from app.core.config import Settings, get_settings
 from app.schemas.analysis import PhishingAnalysis
+from app.schemas.line import LineWebhookProcessResult
 from app.services.analysis_service import analyze_phishing_image
 from app.services.message_builder import build_line_reply
 
@@ -109,6 +110,21 @@ class LineWebhookService:
         self.analysis_function = analysis_function
         self.request_limiter = request_limiter
 
+    async def process_webhook(
+        self,
+        body: bytes,
+        signature: str | None,
+    ) -> LineWebhookProcessResult:
+        try:
+            await self.handle_webhook(body=body, signature=signature)
+        except LineSignatureError:
+            return LineWebhookProcessResult(
+                http_status_code=400,
+                detail="Invalid LINE signature",
+            )
+
+        return LineWebhookProcessResult()
+
     async def handle_webhook(self, body: bytes, signature: str | None) -> None:
         if self.settings.line_signature_verification_enabled:
             if not verify_line_signature(
@@ -120,7 +136,13 @@ class LineWebhookService:
         else:
             logger.warning("LINE signature verification is disabled")
 
-        for event in parse_line_events(body):
+        try:
+            events = parse_line_events(body)
+        except LineWebhookError:
+            logger.warning("LINE webhook payload is invalid")
+            return
+
+        for event in events:
             await self._handle_event(event)
 
     async def _handle_event(self, event: dict[str, Any]) -> None:

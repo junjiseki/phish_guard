@@ -59,6 +59,38 @@ def test_handle_webhook_rejects_missing_signature_by_default() -> None:
         asyncio.run(service.handle_webhook(body=b'{"events":[]}', signature=None))
 
 
+def test_process_webhook_returns_400_for_invalid_signature() -> None:
+    service = LineWebhookService(
+        Settings(
+            LINE_CHANNEL_SECRET="secret",
+            LINE_SIGNATURE_VERIFICATION_ENABLED=True,
+        ),
+    )
+
+    result = asyncio.run(
+        service.process_webhook(body=b'{"events":[]}', signature=None),
+    )
+
+    assert result.http_status_code == 400
+    assert result.detail == "Invalid LINE signature"
+
+
+def test_process_webhook_returns_ok_for_invalid_payload() -> None:
+    service = LineWebhookService(
+        Settings(
+            LINE_CHANNEL_SECRET="",
+            LINE_SIGNATURE_VERIFICATION_ENABLED=False,
+        ),
+    )
+
+    result = asyncio.run(
+        service.process_webhook(body=b"not-json", signature=None),
+    )
+
+    assert result.http_status_code == 200
+    assert result.status == "ok"
+
+
 def test_handle_webhook_can_skip_signature_for_local_ngrok_check() -> None:
     service = LineWebhookService(
         Settings(
