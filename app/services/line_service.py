@@ -9,7 +9,10 @@ import urllib.parse
 import urllib.request
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from datetime import datetime
+from threading import Lock
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from app.core.config import Settings, get_settings
 from app.schemas.analysis import PhishingAnalysis
@@ -21,6 +24,8 @@ logger = logging.getLogger(__name__)
 LINE_SIGNATURE_HEADER = "x-line-signature"
 LINE_CONTENT_API_BASE_URL = "https://api-data.line.me/v2/bot/message"
 LINE_REPLY_API_URL = "https://api.line.me/v2/bot/message/reply"
+DAILY_USER_REQUEST_LIMIT = 2
+DAILY_USER_REQUEST_LIMIT_TIMEZONE = "Asia/Tokyo"
 
 ERROR_REPLY_MESSAGE = "\n".join(
     [
@@ -40,7 +45,57 @@ NON_IMAGE_REPLY_MESSAGE = "\n".join(
     ],
 )
 
+REQUEST_LIMIT_EXCEEDED_REPLY_MESSAGE = "\n".join(
+    [
+        "本日の利用回数が上限に達しました。",
+        "",
+        f"1日に確認できる画像は{DAILY_USER_REQUEST_LIMIT}回までです。",
+        "明日また利用してください。",
+        "",
+        "不安な場合は、URLや添付を開かず、家族や公式窓口に相談してください。",
+    ],
+)
+
 AnalysisFunction = Callable[[bytes, str | None], Awaitable[PhishingAnalysis]]
+
+
+@dataclass
+class UserRequestUsage:
+    used_on: str
+    count: int
+
+
+class DailyUserRequestLimiter:
+    def __init__(
+        self,
+        limit: int = DAILY_USER_REQUEST_LIMIT,
+        timezone_name: str = DAILY_USER_REQUEST_LIMIT_TIMEZONE,
+    ) -> None:
+        self.limit = limit
+        self.timezone = ZoneInfo(timezone_name)
+        self._usage_by_user_id: dict[str, UserRequestUsage] = {}
+        self._lock = Lock()
+
+    def allow(self, user_id: str) -> bool:
+        today = datetime.now(self.timezone).date().isoformat()
+
+        with self._lock:
+            usage = self._usage_by_user_id.get(user_id)
+            if usage is None or usage.used_on != today:
+                self._usage_by_user_id[user_id] = UserRequestUsage(
+                    used_on=today,
+                    count=1,
+                )
+                return True
+
+            if usage.count >= self.limit:
+                return False
+
+            usage.count += 1
+            return True
+
+
+daily_user_request_limiter = DailyUserRequestLimiter()
 
 
 class LineWebhookService:
@@ -48,9 +103,11 @@ class LineWebhookService:
         self,
         settings: Settings | None = None,
         analysis_function: AnalysisFunction = analyze_phishing_image,
+        request_limiter: DailyUserRequestLimiter = daily_user_request_limiter,
     ) -> None:
         self.settings = settings or get_settings()
         self.analysis_function = analysis_function
+        self.request_limiter = request_limiter
 
     async def handle_webhook(self, body: bytes, signature: str | None) -> None:
         if self.settings.line_signature_verification_enabled:
@@ -72,6 +129,11 @@ class LineWebhookService:
             return
 
         try:
+            if not self._is_request_allowed(event):
+                reply_text = REQUEST_LIMIT_EXCEEDED_REPLY_MESSAGE
+                await self.reply_text(reply_token=reply_token, text=reply_text)
+                return
+
             reply_text = await self._build_reply_text(event)
         except Exception as exc:
             logger.warning("LINE event handling failed: %s", type(exc).__name__)
@@ -81,6 +143,13 @@ class LineWebhookService:
             await self.reply_text(reply_token=reply_token, text=reply_text)
         except LineServiceError as exc:
             logger.warning("LINE reply failed: %s", type(exc).__name__)
+
+    def _is_request_allowed(self, event: dict[str, Any]) -> bool:
+        user_id = extract_line_user_id(event)
+        if user_id is None:
+            return True
+
+        return self.request_limiter.allow(user_id)
 
     async def _build_reply_text(self, event: dict[str, Any]) -> str:
         message = event.get("message")
@@ -209,6 +278,18 @@ def parse_line_events(body: bytes) -> list[dict[str, Any]]:
         raise LineWebhookError
 
     return [event for event in events if isinstance(event, dict)]
+
+
+def extract_line_user_id(event: dict[str, Any]) -> str | None:
+    source = event.get("source")
+    if not isinstance(source, dict):
+        return None
+
+    user_id = source.get("userId")
+    if not isinstance(user_id, str) or not user_id:
+        return None
+
+    return user_id
 
 
 def validate_image_content(content: LineMessageContent, max_image_bytes: int) -> None:

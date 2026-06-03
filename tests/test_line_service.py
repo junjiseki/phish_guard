@@ -8,11 +8,15 @@ import pytest
 from app.core.config import Settings
 from app.schemas.analysis import PhishingAnalysis
 from app.services.line_service import (
+    DAILY_USER_REQUEST_LIMIT,
     NON_IMAGE_REPLY_MESSAGE,
+    REQUEST_LIMIT_EXCEEDED_REPLY_MESSAGE,
+    DailyUserRequestLimiter,
     LineContentFetchError,
     LineMessageContent,
     LineSignatureError,
     LineWebhookService,
+    extract_line_user_id,
     parse_line_events,
     validate_image_content,
     verify_line_signature,
@@ -82,6 +86,67 @@ def test_non_image_message_returns_guidance_text() -> None:
     assert reply == NON_IMAGE_REPLY_MESSAGE
     assert "画像で送ってください" in reply
     assert "家族や公式窓口" in reply
+
+
+def test_daily_user_request_limiter_allows_only_configured_count() -> None:
+    limiter = DailyUserRequestLimiter(limit=DAILY_USER_REQUEST_LIMIT)
+
+    assert limiter.allow("user-id")
+    assert limiter.allow("user-id")
+    assert not limiter.allow("user-id")
+    assert limiter.allow("another-user-id")
+
+
+def test_handle_event_returns_limit_message_after_daily_limit() -> None:
+    replies: list[str] = []
+
+    async def fake_reply_text(reply_token: str, text: str) -> None:
+        assert reply_token
+        replies.append(text)
+
+    service = LineWebhookService(
+        Settings(LINE_CHANNEL_SECRET="secret"),
+        request_limiter=DailyUserRequestLimiter(limit=2),
+    )
+    service.reply_text = fake_reply_text  # type: ignore[method-assign]
+
+    event = {
+        "replyToken": "reply-token",
+        "source": {
+            "type": "user",
+            "userId": "user-id",
+        },
+        "message": {
+            "type": "text",
+            "id": "message-id",
+            "text": "hello",
+        },
+    }
+
+    asyncio.run(service._handle_event(event))
+    asyncio.run(service._handle_event(event))
+    asyncio.run(service._handle_event(event))
+
+    assert replies == [
+        NON_IMAGE_REPLY_MESSAGE,
+        NON_IMAGE_REPLY_MESSAGE,
+        REQUEST_LIMIT_EXCEEDED_REPLY_MESSAGE,
+    ]
+
+
+def test_extract_line_user_id_returns_user_source_id() -> None:
+    assert (
+        extract_line_user_id(
+            {
+                "source": {
+                    "type": "user",
+                    "userId": "user-id",
+                },
+            },
+        )
+        == "user-id"
+    )
+    assert extract_line_user_id({"source": {"type": "group"}}) is None
 
 
 def test_parse_line_events_ignores_non_dict_events() -> None:
