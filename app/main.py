@@ -1,4 +1,6 @@
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 
@@ -14,9 +16,17 @@ setup_logging(
 
 logger = logging.getLogger(__name__)
 
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    logger.info("Application started", extra={"app_env": settings.app_env})
+    yield
+
+
 app = FastAPI(
     title="Scam SMS and Phishing Mail Consultation AI",
     debug=settings.app_debug,
+    lifespan=lifespan,
 )
 
 app.include_router(line_router)
@@ -32,8 +42,3 @@ async def callback(request: Request) -> dict[str, str]:
     body = await request.body()
     print(body.decode())
     return {"status": "ok"}
-
-
-@app.on_event("startup")
-async def on_startup() -> None:
-    logger.info("Application started", extra={"app_env": settings.app_env})
