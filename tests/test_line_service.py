@@ -15,6 +15,7 @@ from app.services.line_service import (
     NON_IMAGE_REPLY_MESSAGE,
     REQUEST_LIMIT_EXCEEDED_REPLY_MESSAGE,
     DailyUserRequestLimiter,
+    FirestoreDailyUserRequestLimiter,
     LineContentFetchError,
     LineMessageContent,
     LineWebhookService,
@@ -99,6 +100,31 @@ def test_process_webhook_returns_ok_without_signature_verification() -> None:
     assert result.http_status_code == HTTP_STATUS_OK_EXPECTED
 
 
+def test_process_webhook_processes_events_before_returning() -> None:
+    handled_events: list[dict[str, object]] = []
+
+    class TestLineWebhookService(LineWebhookService):
+        async def _handle_event(self, event: dict[str, object]) -> None:  # type: ignore[override]
+            handled_events.append(event)
+
+    service = TestLineWebhookService(
+        Settings(
+            LINE_CHANNEL_SECRET="",
+            LINE_SIGNATURE_VERIFICATION_ENABLED=False,
+        ),
+    )
+
+    result = asyncio.run(
+        service.process_webhook(
+            body=b'{"events":[{"replyToken":"reply-token"}]}',
+            signature=None,
+        ),
+    )
+
+    assert result.http_status_code == HTTP_STATUS_OK_EXPECTED
+    assert handled_events == [{"replyToken": "reply-token"}]
+
+
 def test_non_image_message_returns_guidance_text() -> None:
     service = LineWebhookService(Settings(LINE_CHANNEL_SECRET="secret"))
     event = {
@@ -124,6 +150,69 @@ def test_daily_user_request_limiter_allows_only_configured_count() -> None:
     assert limiter.allow("user-id")
     assert not limiter.allow("user-id")
     assert limiter.allow("another-user-id")
+
+
+def test_firestore_request_limiter_creates_usage_document() -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    class FakeFirestoreLimiter(FirestoreDailyUserRequestLimiter):
+        def _post_json(self, *, path: str, body: dict[str, object]) -> object:  # type: ignore[override]
+            calls.append((path, body))
+            if path == ":beginTransaction":
+                return {"transaction": "transaction-id"}
+            if path == ":batchGet":
+                return [{}]
+            if path == ":commit":
+                return {}
+            raise AssertionError(path)
+
+    limiter = FakeFirestoreLimiter(
+        project_id="project-id",
+        database_id="(default)",
+        collection="usage",
+        limit=2,
+        timeout_seconds=1,
+    )
+
+    assert limiter.allow("user-id")
+    assert calls[-1][0] == ":commit"
+    fields = calls[-1][1]["writes"][0]["update"]["fields"]  # type: ignore[index]
+    assert fields["count"] == {"integerValue": "1"}
+
+
+def test_firestore_request_limiter_rejects_when_limit_is_reached() -> None:
+    calls: list[str] = []
+
+    class FakeFirestoreLimiter(FirestoreDailyUserRequestLimiter):
+        def _post_json(self, *, path: str, body: dict[str, object]) -> object:  # type: ignore[override]
+            calls.append(path)
+            if path == ":beginTransaction":
+                return {"transaction": "transaction-id"}
+            if path == ":batchGet":
+                return [
+                    {
+                        "found": {
+                            "fields": {
+                                "count": {"integerValue": "2"},
+                            },
+                        },
+                    },
+                ]
+            if path == ":rollback":
+                return {}
+            raise AssertionError(path)
+
+    limiter = FakeFirestoreLimiter(
+        project_id="project-id",
+        database_id="(default)",
+        collection="usage",
+        limit=2,
+        timeout_seconds=1,
+    )
+
+    assert not limiter.allow("user-id")
+    assert ":commit" not in calls
+    assert calls[-1] == ":rollback"
 
 
 def test_text_messages_do_not_consume_daily_limit() -> None:
