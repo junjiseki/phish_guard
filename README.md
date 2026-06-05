@@ -481,10 +481,10 @@ uv run pytest
 
 Repository variables:
 
-| 名前 | 例 |
-|------|-----|
-| `GCP_PROJECT_ID` | `your-gcp-project-id` |
-| `GCP_REGION` | `asia-northeast1` |
+| 名前 | 例 | 必須 |
+|------|-----|------|
+| `GCP_PROJECT_ID` | `your-gcp-project-id` | はい |
+| `GCP_REGION` | `asia-northeast1` | いいえ（未設定時は `asia-northeast1`） |
 
 Repository secrets（Workload Identity Federation）:
 
@@ -500,6 +500,8 @@ Repository secrets（Workload Identity Federation）:
 - `roles/iam.serviceAccountUser`（Cloud Run の実行 SA を指定する場合）
 
 Workload Identity Federation の作成例:
+
+以下の `YOUR_PROJECT_ID`、`PROJECT_NUMBER`、`GITHUB_OWNER`、`GITHUB_REPO` は自分の環境の値に置き換えてください。`--member` の `attribute.repository` は GitHub の `owner/repo` と一致している必要があります。
 
 ```bash
 gcloud iam workload-identity-pools create github-actions \
@@ -518,8 +520,10 @@ gcloud iam workload-identity-pools providers create-oidc github \
 gcloud iam service-accounts add-iam-policy-binding github-actions@YOUR_PROJECT_ID.iam.gserviceaccount.com \
   --project=YOUR_PROJECT_ID \
   --role="roles/iam.workloadIdentityUser" \
-  --member="principalSet://iam.googleapis.com/projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/github-actions/attribute.repository/junjiseki/phish_guard"
+  --member="principalSet://iam.googleapis.com/projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/github-actions/attribute.repository/GITHUB_OWNER/GITHUB_REPO"
 ```
+
+例: リポジトリが `https://github.com/acme-corp/phish-guard` の場合、`GITHUB_OWNER/GITHUB_REPO` は `acme-corp/phish-guard` です。
 
 ## セキュリティ方針
 
