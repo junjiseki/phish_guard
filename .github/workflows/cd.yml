@@ -19,6 +19,8 @@ jobs:
   deploy:
     name: Deploy to Cloud Run
     runs-on: ubuntu-latest
+    env:
+      GCP_REGION: ${{ vars.GCP_REGION || 'asia-northeast1' }}
     permissions:
       contents: read
       id-token: write
@@ -36,12 +38,11 @@ jobs:
         uses: google-github-actions/setup-gcloud@v2
 
       - name: Configure Docker for Artifact Registry
-        run: gcloud auth configure-docker "${{ vars.GCP_REGION }}-docker.pkg.dev" --quiet
+        run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
 
       - name: Build and push image
         env:
           GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
-          GCP_REGION: ${{ vars.GCP_REGION }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
           if [ -z "${GCP_PROJECT_ID}" ]; then
@@ -49,8 +50,7 @@ jobs:
             exit 1
           fi
 
-          REGION="${GCP_REGION:-asia-northeast1}"
-          IMAGE_URI="${REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${ARTIFACT_REGISTRY_REPOSITORY}/${IMAGE_NAME}"
+          IMAGE_URI="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${ARTIFACT_REGISTRY_REPOSITORY}/${IMAGE_NAME}"
 
           docker build -t "${IMAGE_URI}:${IMAGE_TAG}" -t "${IMAGE_URI}:latest" .
           docker push "${IMAGE_URI}:${IMAGE_TAG}"
@@ -59,15 +59,13 @@ jobs:
       - name: Deploy to Cloud Run
         env:
           GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
-          GCP_REGION: ${{ vars.GCP_REGION }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          REGION="${GCP_REGION:-asia-northeast1}"
-          IMAGE_URI="${REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${ARTIFACT_REGISTRY_REPOSITORY}/${IMAGE_NAME}:${IMAGE_TAG}"
+          IMAGE_URI="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${ARTIFACT_REGISTRY_REPOSITORY}/${IMAGE_NAME}:${IMAGE_TAG}"
 
           gcloud run services update "${CLOUD_RUN_SERVICE}" \
             --project="${GCP_PROJECT_ID}" \
-            --region="${REGION}" \
+            --region="${GCP_REGION}" \
             --image="${IMAGE_URI}" \
             --platform=managed \
             --quiet
