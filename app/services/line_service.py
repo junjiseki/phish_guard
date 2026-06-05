@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import logging
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -11,7 +12,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
 from threading import Lock
-from typing import Any
+from typing import Any, Protocol
 from zoneinfo import ZoneInfo
 
 from app.core.config import Settings, get_settings
@@ -30,6 +31,12 @@ HTTP_STATUS_BAD_REQUEST = 400
 INVALID_LINE_SIGNATURE_DETAIL = "Invalid LINE signature"
 DAILY_USER_REQUEST_LIMIT = 2
 DAILY_USER_REQUEST_LIMIT_TIMEZONE = "Asia/Tokyo"
+USER_REQUEST_LIMIT_STORE_FIRESTORE = "firestore"
+FIRESTORE_API_BASE_URL = "https://firestore.googleapis.com/v1"
+GCP_METADATA_TOKEN_URL = (
+    "http://metadata.google.internal/computeMetadata/v1/instance/"
+    "service-accounts/default/token"
+)
 
 ERROR_REPLY_MESSAGE = "\n".join(
     [
@@ -61,6 +68,10 @@ REQUEST_LIMIT_EXCEEDED_REPLY_MESSAGE = "\n".join(
 )
 
 AnalysisFunction = Callable[[bytes, str | None], Awaitable[PhishingAnalysis]]
+
+
+class UserRequestLimiter(Protocol):
+    def allow(self, user_id: str) -> bool: ...
 
 
 @dataclass
@@ -100,6 +111,10 @@ class DailyUserRequestLimiter:
 
 
 daily_user_request_limiter = DailyUserRequestLimiter()
+_memory_limiter_lock = Lock()
+_memory_limiters_by_limit: dict[int, DailyUserRequestLimiter] = {
+    DAILY_USER_REQUEST_LIMIT: daily_user_request_limiter,
+}
 
 
 class LineWebhookService:
@@ -107,11 +122,11 @@ class LineWebhookService:
         self,
         settings: Settings | None = None,
         analysis_function: AnalysisFunction = analyze_phishing_image,
-        request_limiter: DailyUserRequestLimiter = daily_user_request_limiter,
+        request_limiter: UserRequestLimiter | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self.analysis_function = analysis_function
-        self.request_limiter = request_limiter
+        self.request_limiter = request_limiter or build_request_limiter(self.settings)
 
     async def process_webhook(
         self,
@@ -137,7 +152,7 @@ class LineWebhookService:
             logger.warning("LINE webhook payload is invalid")
             return LineWebhookProcessResult()
 
-        asyncio.create_task(self._process_events(events))
+        await self._process_events(events)
         return LineWebhookProcessResult()
 
     async def _process_events(self, events: list[dict[str, Any]]) -> None:
@@ -171,19 +186,19 @@ class LineWebhookService:
         except LineServiceError as exc:
             logger.warning("LINE reply failed: %s", type(exc).__name__)
 
-    def _is_request_allowed(self, event: dict[str, Any]) -> bool:
+    async def _is_request_allowed(self, event: dict[str, Any]) -> bool:
         user_id = extract_line_user_id(event)
         if user_id is None:
             return True
 
-        return self.request_limiter.allow(user_id)
+        return await asyncio.to_thread(self.request_limiter.allow, user_id)
 
     async def _build_reply_text(self, event: dict[str, Any]) -> str:
         message = event.get("message")
         if not isinstance(message, dict) or message.get("type") != "image":
             return NON_IMAGE_REPLY_MESSAGE
 
-        if not self._is_request_allowed(event):
+        if not await self._is_request_allowed(event):
             return REQUEST_LIMIT_EXCEEDED_REPLY_MESSAGE
 
         message_id = message.get("id")
@@ -316,6 +331,231 @@ def extract_line_user_id(event: dict[str, Any]) -> str | None:
         return None
 
     return user_id
+
+
+class FirestoreDailyUserRequestLimiter:
+    def __init__(
+        self,
+        *,
+        project_id: str,
+        database_id: str,
+        collection: str,
+        limit: int,
+        timeout_seconds: int,
+        timezone_name: str = DAILY_USER_REQUEST_LIMIT_TIMEZONE,
+    ) -> None:
+        if not project_id:
+            raise LineConfigurationError
+
+        self.project_id = project_id
+        self.database_id = database_id
+        self.collection = collection
+        self.limit = limit
+        self.timeout_seconds = timeout_seconds
+        self.timezone = ZoneInfo(timezone_name)
+        self._token_lock = Lock()
+        self._access_token = ""
+        self._access_token_expires_at = 0.0
+
+    def allow(self, user_id: str) -> bool:
+        today = datetime.now(self.timezone).date().isoformat()
+        document_name = self._document_name(user_id=user_id, used_on=today)
+        transaction = self._begin_transaction()
+
+        try:
+            document = self._lookup_document(
+                document_name=document_name,
+                transaction=transaction,
+            )
+            count = self._document_count(document)
+            if count >= self.limit:
+                self._rollback_transaction(transaction)
+                return False
+
+            self._commit_usage(
+                document_name=document_name,
+                user_id=user_id,
+                used_on=today,
+                count=count + 1,
+                transaction=transaction,
+            )
+            return True
+        except Exception:
+            self._rollback_transaction(transaction)
+            raise
+
+    def _begin_transaction(self) -> str:
+        response = self._post_json(
+            path=":beginTransaction",
+            body={"options": {"readWrite": {}}},
+        )
+        transaction = response.get("transaction")
+        if not isinstance(transaction, str) or not transaction:
+            raise LineConfigurationError
+        return transaction
+
+    def _lookup_document(
+        self,
+        *,
+        document_name: str,
+        transaction: str,
+    ) -> dict[str, Any] | None:
+        response = self._post_json(
+            path=":batchGet",
+            body={
+                "documents": [document_name],
+                "transaction": transaction,
+            },
+        )
+
+        if isinstance(response, list):
+            response = response[0] if response else {}
+
+        found = response.get("found")
+        if isinstance(found, dict):
+            return found
+        return None
+
+    def _commit_usage(
+        self,
+        *,
+        document_name: str,
+        user_id: str,
+        used_on: str,
+        count: int,
+        transaction: str,
+    ) -> None:
+        self._post_json(
+            path=":commit",
+            body={
+                "transaction": transaction,
+                "writes": [
+                    {
+                        "update": {
+                            "name": document_name,
+                            "fields": {
+                                "user_id_hash": {
+                                    "stringValue": hashlib.sha256(
+                                        user_id.encode("utf-8"),
+                                    ).hexdigest(),
+                                },
+                                "used_on": {"stringValue": used_on},
+                                "count": {"integerValue": str(count)},
+                            },
+                        },
+                    },
+                ],
+            },
+        )
+
+    def _rollback_transaction(self, transaction: str) -> None:
+        try:
+            self._post_json(path=":rollback", body={"transaction": transaction})
+        except LineServiceError:
+            logger.warning("Firestore transaction rollback failed")
+
+    def _document_name(self, *, user_id: str, used_on: str) -> str:
+        document_id = hashlib.sha256(f"{user_id}:{used_on}".encode()).hexdigest()
+        return (
+            f"projects/{self.project_id}/databases/{self.database_id}/documents/"
+            f"{self.collection}/{document_id}"
+        )
+
+    def _document_count(self, document: dict[str, Any] | None) -> int:
+        if document is None:
+            return 0
+
+        fields = document.get("fields")
+        if not isinstance(fields, dict):
+            return 0
+
+        count_field = fields.get("count")
+        if not isinstance(count_field, dict):
+            return 0
+
+        count = count_field.get("integerValue")
+        if not isinstance(count, str):
+            return 0
+
+        try:
+            return int(count)
+        except ValueError:
+            return 0
+
+    def _post_json(self, *, path: str, body: dict[str, Any]) -> Any:
+        quoted_project_id = urllib.parse.quote(self.project_id, safe="")
+        quoted_database_id = urllib.parse.quote(self.database_id, safe="")
+        database_path = (
+            f"projects/{quoted_project_id}/databases/{quoted_database_id}/documents"
+        )
+        url = f"{FIRESTORE_API_BASE_URL}/{database_path}{path}"
+        request = urllib.request.Request(
+            url=url,
+            data=json.dumps(body).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {self._get_access_token()}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(
+                request,
+                timeout=self.timeout_seconds,
+            ) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except (TimeoutError, urllib.error.URLError, urllib.error.HTTPError) as exc:
+            raise LineConfigurationError from exc
+
+    def _get_access_token(self) -> str:
+        with self._token_lock:
+            if self._access_token and time.monotonic() < self._access_token_expires_at:
+                return self._access_token
+
+            request = urllib.request.Request(
+                url=GCP_METADATA_TOKEN_URL,
+                headers={"Metadata-Flavor": "Google"},
+                method="GET",
+            )
+            try:
+                with urllib.request.urlopen(
+                    request,
+                    timeout=self.timeout_seconds,
+                ) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+            except (TimeoutError, urllib.error.URLError, urllib.error.HTTPError) as exc:
+                raise LineConfigurationError from exc
+
+            access_token = payload.get("access_token")
+            if not isinstance(access_token, str) or not access_token:
+                raise LineConfigurationError
+
+            expires_in = payload.get("expires_in")
+            if not isinstance(expires_in, int):
+                expires_in = 300
+
+            self._access_token = access_token
+            self._access_token_expires_at = time.monotonic() + max(expires_in - 60, 1)
+            return access_token
+
+
+def build_request_limiter(settings: Settings) -> UserRequestLimiter:
+    if settings.user_request_limit_store.lower() == USER_REQUEST_LIMIT_STORE_FIRESTORE:
+        return FirestoreDailyUserRequestLimiter(
+            project_id=settings.gcp_project_id,
+            database_id=settings.firestore_database_id,
+            collection=settings.firestore_usage_collection,
+            limit=settings.daily_user_request_limit,
+            timeout_seconds=settings.request_timeout_seconds,
+        )
+
+    with _memory_limiter_lock:
+        limiter = _memory_limiters_by_limit.get(settings.daily_user_request_limit)
+        if limiter is None:
+            limiter = DailyUserRequestLimiter(limit=settings.daily_user_request_limit)
+            _memory_limiters_by_limit[settings.daily_user_request_limit] = limiter
+        return limiter
 
 
 def validate_image_content(content: LineMessageContent, max_image_bytes: int) -> None:
