@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from threading import Lock
 from typing import Any, Protocol
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.core.config import Settings
 
@@ -19,8 +19,10 @@ logger = logging.getLogger(__name__)
 
 DAILY_USER_REQUEST_LIMIT = 2
 DAILY_USER_REQUEST_LIMIT_TIMEZONE = "Asia/Tokyo"
+USER_REQUEST_LIMIT_STORE_MEMORY = "memory"
 USER_REQUEST_LIMIT_STORE_FIRESTORE = "firestore"
 FIRESTORE_API_BASE_URL = "https://firestore.googleapis.com/v1"
+FIRESTORE_BATCH_GET_PATH = ":batchGet"
 GCP_METADATA_TOKEN_URL = (
     "http://metadata.google.internal/computeMetadata/v1/instance/"
     "service-accounts/default/token"
@@ -45,14 +47,60 @@ class UserRequestUsage:
     count: int
 
 
+def validate_positive_limit(limit: int) -> int:
+    if limit <= 0:
+        raise UserRequestLimiterConfigurationError(
+            "daily_user_request_limit must be a positive integer",
+        )
+    return limit
+
+
+def validate_positive_timeout(timeout_seconds: int) -> int:
+    if timeout_seconds <= 0:
+        raise UserRequestLimiterConfigurationError(
+            "request_timeout_seconds must be a positive integer",
+        )
+    return timeout_seconds
+
+
+def resolve_timezone(timezone_name: str) -> ZoneInfo:
+    try:
+        return ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError:
+        logger.warning(
+            "Timezone %s is unavailable; falling back to UTC",
+            timezone_name,
+        )
+        return ZoneInfo("UTC")
+
+
+def parse_firestore_response(path: str, raw_body: str) -> Any:
+    if path == FIRESTORE_BATCH_GET_PATH:
+        return parse_ndjson_objects(raw_body)
+    return json.loads(raw_body)
+
+
+def parse_ndjson_objects(raw_body: str) -> list[dict[str, Any]]:
+    objects: list[dict[str, Any]] = []
+    for line in raw_body.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        payload = json.loads(stripped)
+        if not isinstance(payload, dict):
+            raise UserRequestLimiterConfigurationError
+        objects.append(payload)
+    return objects
+
+
 class DailyUserRequestLimiter:
     def __init__(
         self,
         limit: int = DAILY_USER_REQUEST_LIMIT,
         timezone_name: str = DAILY_USER_REQUEST_LIMIT_TIMEZONE,
     ) -> None:
-        self.limit = limit
-        self.timezone = ZoneInfo(timezone_name)
+        self.limit = validate_positive_limit(limit)
+        self.timezone = resolve_timezone(timezone_name)
         self._usage_by_user_id: dict[str, UserRequestUsage] = {}
         self._lock = Lock()
 
@@ -99,9 +147,9 @@ class FirestoreDailyUserRequestLimiter:
         self.project_id = project_id
         self.database_id = database_id
         self.collection = collection
-        self.limit = limit
-        self.timeout_seconds = timeout_seconds
-        self.timezone = ZoneInfo(timezone_name)
+        self.limit = validate_positive_limit(limit)
+        self.timeout_seconds = validate_positive_timeout(timeout_seconds)
+        self.timezone = resolve_timezone(timezone_name)
         self._token_lock = Lock()
         self._access_token = ""
         self._access_token_expires_at = 0.0
@@ -150,17 +198,21 @@ class FirestoreDailyUserRequestLimiter:
         transaction: str,
     ) -> dict[str, Any] | None:
         response = self._post_json(
-            path=":batchGet",
+            path=FIRESTORE_BATCH_GET_PATH,
             body={
                 "documents": [document_name],
                 "transaction": transaction,
             },
         )
 
-        if isinstance(response, list):
-            response = response[0] if response else {}
+        if not isinstance(response, list):
+            raise UserRequestLimiterConfigurationError
 
-        found = response.get("found")
+        if not response:
+            return None
+
+        first_response = response[0]
+        found = first_response.get("found")
         if isinstance(found, dict):
             return found
         return None
@@ -253,8 +305,11 @@ class FirestoreDailyUserRequestLimiter:
                 request,
                 timeout=self.timeout_seconds,
             ) as response:
-                return json.loads(response.read().decode("utf-8"))
+                raw_body = response.read().decode("utf-8")
+                return parse_firestore_response(path, raw_body)
         except (TimeoutError, urllib.error.URLError, urllib.error.HTTPError) as exc:
+            raise UserRequestLimiterConfigurationError from exc
+        except json.JSONDecodeError as exc:
             raise UserRequestLimiterConfigurationError from exc
 
     def _get_access_token(self) -> str:
@@ -290,18 +345,26 @@ class FirestoreDailyUserRequestLimiter:
 
 
 def build_request_limiter(settings: Settings) -> UserRequestLimiter:
-    if settings.user_request_limit_store.lower() == USER_REQUEST_LIMIT_STORE_FIRESTORE:
+    store = settings.user_request_limit_store.lower()
+    limit = validate_positive_limit(settings.daily_user_request_limit)
+
+    if store == USER_REQUEST_LIMIT_STORE_FIRESTORE:
         return FirestoreDailyUserRequestLimiter(
             project_id=settings.gcp_project_id,
             database_id=settings.firestore_database_id,
             collection=settings.firestore_usage_collection,
-            limit=settings.daily_user_request_limit,
-            timeout_seconds=settings.request_timeout_seconds,
+            limit=limit,
+            timeout_seconds=validate_positive_timeout(settings.request_timeout_seconds),
         )
 
-    with _memory_limiter_lock:
-        limiter = _memory_limiters_by_limit.get(settings.daily_user_request_limit)
-        if limiter is None:
-            limiter = DailyUserRequestLimiter(limit=settings.daily_user_request_limit)
-            _memory_limiters_by_limit[settings.daily_user_request_limit] = limiter
-        return limiter
+    if store == USER_REQUEST_LIMIT_STORE_MEMORY:
+        with _memory_limiter_lock:
+            limiter = _memory_limiters_by_limit.get(limit)
+            if limiter is None:
+                limiter = DailyUserRequestLimiter(limit=limit)
+                _memory_limiters_by_limit[limit] = limiter
+            return limiter
+
+    raise UserRequestLimiterConfigurationError(
+        f"Unknown user_request_limit_store: {settings.user_request_limit_store}",
+    )
