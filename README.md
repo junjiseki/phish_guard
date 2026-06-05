@@ -100,7 +100,7 @@ cp .env.example .env
 | `REQUEST_TIMEOUT_SECONDS` | 任意 | 外部APIへのタイムアウト秒数 |
 | `MAX_IMAGE_BYTES` | 任意 | 受け付ける最大画像サイズ |
 | `DAILY_USER_REQUEST_LIMIT` | 任意 | 1ユーザーが1日に解析できる画像数 |
-| `USER_REQUEST_LIMIT_STORE` | 任意 | 利用回数の保存先。ローカルは `memory`、Cloud Runは `firestore` を推奨 |
+| `USER_REQUEST_LIMIT_STORE` | 任意 | 利用回数の保存先。ローカルは `memory`、Cloud Runは `firestore` を推奨。`firestore` は Cloud Run 上でのみ動作します |
 | `GCP_PROJECT_ID` | Firestore利用時 | Firestore REST APIで使うGoogle Cloud project ID |
 | `FIRESTORE_DATABASE_ID` | Firestore利用時 | Firestore database ID。既定値は `(default)` |
 | `FIRESTORE_USAGE_COLLECTION` | Firestore利用時 | 利用回数を保存するFirestore collection |

@@ -2,20 +2,17 @@ import asyncio
 import base64
 import hashlib
 import hmac
+import time
 
 import pytest
 
 from app.core.config import Settings
 from app.schemas.analysis import PhishingAnalysis
 from app.services.line_service import (
-    DAILY_USER_REQUEST_LIMIT,
     HTTP_STATUS_BAD_REQUEST,
     HTTP_STATUS_OK,
     INVALID_LINE_SIGNATURE_DETAIL,
     NON_IMAGE_REPLY_MESSAGE,
-    REQUEST_LIMIT_EXCEEDED_REPLY_MESSAGE,
-    DailyUserRequestLimiter,
-    FirestoreDailyUserRequestLimiter,
     LineContentFetchError,
     LineMessageContent,
     LineWebhookService,
@@ -23,6 +20,10 @@ from app.services.line_service import (
     parse_line_events,
     validate_image_content,
     verify_line_signature,
+)
+from app.services.user_request_limiter import (
+    DailyUserRequestLimiter,
+    UserRequestLimiterConfigurationError,
 )
 
 HTTP_STATUS_BAD_REQUEST_EXPECTED = HTTP_STATUS_BAD_REQUEST
@@ -100,28 +101,54 @@ def test_process_webhook_returns_ok_without_signature_verification() -> None:
     assert result.http_status_code == HTTP_STATUS_OK_EXPECTED
 
 
-def test_process_webhook_processes_events_before_returning() -> None:
+def test_process_webhook_returns_before_processing_completes() -> None:
+    class SlowLineWebhookService(LineWebhookService):
+        async def _process_events(self, events: list[dict[str, object]]) -> None:  # type: ignore[override]
+            await asyncio.sleep(0.5)
+
+    async def run() -> tuple[object, float]:
+        service = SlowLineWebhookService(
+            Settings(
+                LINE_CHANNEL_SECRET="",
+                LINE_SIGNATURE_VERIFICATION_ENABLED=False,
+            ),
+        )
+        start = time.monotonic()
+        result = await service.process_webhook(
+            body=b'{"events":[{"replyToken":"reply-token"}]}',
+            signature=None,
+        )
+        elapsed = time.monotonic() - start
+        return result, elapsed
+
+    result, elapsed = asyncio.run(run())
+
+    assert result.http_status_code == HTTP_STATUS_OK_EXPECTED
+    assert elapsed < 0.1
+
+
+def test_process_webhook_schedules_event_processing() -> None:
     handled_events: list[dict[str, object]] = []
 
     class TestLineWebhookService(LineWebhookService):
         async def _handle_event(self, event: dict[str, object]) -> None:  # type: ignore[override]
             handled_events.append(event)
 
-    service = TestLineWebhookService(
-        Settings(
-            LINE_CHANNEL_SECRET="",
-            LINE_SIGNATURE_VERIFICATION_ENABLED=False,
-        ),
-    )
-
-    result = asyncio.run(
-        service.process_webhook(
+    async def run() -> None:
+        service = TestLineWebhookService(
+            Settings(
+                LINE_CHANNEL_SECRET="",
+                LINE_SIGNATURE_VERIFICATION_ENABLED=False,
+            ),
+        )
+        result = await service.process_webhook(
             body=b'{"events":[{"replyToken":"reply-token"}]}',
             signature=None,
-        ),
-    )
+        )
+        assert result.http_status_code == HTTP_STATUS_OK_EXPECTED
+        await asyncio.sleep(0)
 
-    assert result.http_status_code == HTTP_STATUS_OK_EXPECTED
+    asyncio.run(run())
     assert handled_events == [{"replyToken": "reply-token"}]
 
 
@@ -141,78 +168,6 @@ def test_non_image_message_returns_guidance_text() -> None:
     assert reply == NON_IMAGE_REPLY_MESSAGE
     assert "画像で送ってください" in reply
     assert "家族や公式窓口" in reply
-
-
-def test_daily_user_request_limiter_allows_only_configured_count() -> None:
-    limiter = DailyUserRequestLimiter(limit=DAILY_USER_REQUEST_LIMIT)
-
-    assert limiter.allow("user-id")
-    assert limiter.allow("user-id")
-    assert not limiter.allow("user-id")
-    assert limiter.allow("another-user-id")
-
-
-def test_firestore_request_limiter_creates_usage_document() -> None:
-    calls: list[tuple[str, dict[str, object]]] = []
-
-    class FakeFirestoreLimiter(FirestoreDailyUserRequestLimiter):
-        def _post_json(self, *, path: str, body: dict[str, object]) -> object:  # type: ignore[override]
-            calls.append((path, body))
-            if path == ":beginTransaction":
-                return {"transaction": "transaction-id"}
-            if path == ":batchGet":
-                return [{}]
-            if path == ":commit":
-                return {}
-            raise AssertionError(path)
-
-    limiter = FakeFirestoreLimiter(
-        project_id="project-id",
-        database_id="(default)",
-        collection="usage",
-        limit=2,
-        timeout_seconds=1,
-    )
-
-    assert limiter.allow("user-id")
-    assert calls[-1][0] == ":commit"
-    fields = calls[-1][1]["writes"][0]["update"]["fields"]  # type: ignore[index]
-    assert fields["count"] == {"integerValue": "1"}
-
-
-def test_firestore_request_limiter_rejects_when_limit_is_reached() -> None:
-    calls: list[str] = []
-
-    class FakeFirestoreLimiter(FirestoreDailyUserRequestLimiter):
-        def _post_json(self, *, path: str, body: dict[str, object]) -> object:  # type: ignore[override]
-            calls.append(path)
-            if path == ":beginTransaction":
-                return {"transaction": "transaction-id"}
-            if path == ":batchGet":
-                return [
-                    {
-                        "found": {
-                            "fields": {
-                                "count": {"integerValue": "2"},
-                            },
-                        },
-                    },
-                ]
-            if path == ":rollback":
-                return {}
-            raise AssertionError(path)
-
-    limiter = FakeFirestoreLimiter(
-        project_id="project-id",
-        database_id="(default)",
-        collection="usage",
-        limit=2,
-        timeout_seconds=1,
-    )
-
-    assert not limiter.allow("user-id")
-    assert ":commit" not in calls
-    assert calls[-1] == ":rollback"
 
 
 def test_text_messages_do_not_consume_daily_limit() -> None:
@@ -278,9 +233,28 @@ def test_handle_event_returns_limit_message_after_daily_limit() -> None:
     asyncio.run(service._handle_event(image_event))
     asyncio.run(service._handle_event(image_event))
 
-    assert replies[0] != REQUEST_LIMIT_EXCEEDED_REPLY_MESSAGE
-    assert replies[1] != REQUEST_LIMIT_EXCEEDED_REPLY_MESSAGE
-    assert replies[2] == REQUEST_LIMIT_EXCEEDED_REPLY_MESSAGE
+    assert "本日の利用回数が上限に達しました" not in replies[0]
+    assert "本日の利用回数が上限に達しました" not in replies[1]
+    assert replies[2] == service._request_limit_exceeded_message()
+
+
+def test_limiter_failure_returns_limit_message() -> None:
+    class BrokenLimiter:
+        def allow(self, user_id: str) -> bool:
+            raise UserRequestLimiterConfigurationError
+
+    service = LineWebhookService(
+        Settings(LINE_CHANNEL_SECRET="secret"),
+        request_limiter=BrokenLimiter(),
+    )
+    event = {
+        "source": {"type": "user", "userId": "user-id"},
+        "message": {"type": "image", "id": "message-id"},
+    }
+
+    reply = asyncio.run(service._build_reply_text(event))
+
+    assert reply == service._request_limit_exceeded_message()
 
 
 def test_extract_line_user_id_returns_user_source_id() -> None:
