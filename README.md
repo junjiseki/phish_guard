@@ -99,6 +99,11 @@ cp .env.example .env
 | `GEMINI_MODEL` | 任意 | 使用するGeminiモデル。既定値は `gemini-2.5-flash` |
 | `REQUEST_TIMEOUT_SECONDS` | 任意 | 外部APIへのタイムアウト秒数 |
 | `MAX_IMAGE_BYTES` | 任意 | 受け付ける最大画像サイズ |
+| `DAILY_USER_REQUEST_LIMIT` | 任意 | 1ユーザーが1日に解析できる画像数 |
+| `USER_REQUEST_LIMIT_STORE` | 任意 | 利用回数の保存先。ローカルは `memory`、Cloud Runは `firestore` を推奨。`firestore` は Cloud Run 上でのみ動作します |
+| `GCP_PROJECT_ID` | Firestore利用時 | Firestore REST APIで使うGoogle Cloud project ID |
+| `FIRESTORE_DATABASE_ID` | Firestore利用時 | Firestore database ID。既定値は `(default)` |
+| `FIRESTORE_USAGE_COLLECTION` | Firestore利用時 | 利用回数を保存するFirestore collection |
 
 ## LINE Developers設定手順
 
@@ -369,7 +374,9 @@ cp terraform/terraform.tfvars.example terraform/terraform.tfvars
 
 `terraform/terraform.tfvars` の `project_id` と `image` を自分のGoogle Cloud projectに合わせます。
 
-機密値をTerraform変数に入れると、Terraform stateにも保存されます。開発用途では簡単ですが、本番ではSecret Managerの値をTerraform外で管理することを推奨します。
+機密値をTerraform変数に入れると、Terraform stateにも保存されます。開発用途では簡単ですが、本番ではSecret Managerの値をTerraform外で管理し、`line_channel_secret_secret_id`、`line_channel_access_token_secret_id`、`gemini_api_key_secret_id` に既存secret IDを設定することを推奨します。
+
+Cloud Runでは、利用回数制限の保存先としてFirestoreを使う設定が既定です。事前にFirestore Native modeのデータベースを作成し、`user_request_limit_store = "firestore"` のままデプロイしてください。ローカルや一時検証だけなら `memory` も使えますが、Cloud Runのインスタンス再起動や複数インスタンスでは正確な制限になりません。
 
 ### Artifact Registryを先に作成する
 

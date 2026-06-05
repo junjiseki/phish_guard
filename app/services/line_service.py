@@ -9,16 +9,18 @@ import urllib.parse
 import urllib.request
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import datetime
-from threading import Lock
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from app.core.config import Settings, get_settings
 from app.schemas.analysis import PhishingAnalysis
 from app.schemas.line import LineWebhookProcessResult
 from app.services.analysis_service import analyze_phishing_image
 from app.services.message_builder import build_line_reply
+from app.services.user_request_limiter import (
+    UserRequestLimiter,
+    UserRequestLimiterConfigurationError,
+    build_request_limiter,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +30,6 @@ LINE_REPLY_API_URL = "https://api.line.me/v2/bot/message/reply"
 HTTP_STATUS_OK = 200
 HTTP_STATUS_BAD_REQUEST = 400
 INVALID_LINE_SIGNATURE_DETAIL = "Invalid LINE signature"
-DAILY_USER_REQUEST_LIMIT = 2
-DAILY_USER_REQUEST_LIMIT_TIMEZONE = "Asia/Tokyo"
 
 ERROR_REPLY_MESSAGE = "\n".join(
     [
@@ -49,57 +49,7 @@ NON_IMAGE_REPLY_MESSAGE = "\n".join(
     ],
 )
 
-REQUEST_LIMIT_EXCEEDED_REPLY_MESSAGE = "\n".join(
-    [
-        "本日の利用回数が上限に達しました。",
-        "",
-        f"1日に確認できる画像は{DAILY_USER_REQUEST_LIMIT}回までです。",
-        "明日また利用してください。",
-        "",
-        "不安な場合は、URLや添付を開かず、家族や公式窓口に相談してください。",
-    ],
-)
-
 AnalysisFunction = Callable[[bytes, str | None], Awaitable[PhishingAnalysis]]
-
-
-@dataclass
-class UserRequestUsage:
-    used_on: str
-    count: int
-
-
-class DailyUserRequestLimiter:
-    def __init__(
-        self,
-        limit: int = DAILY_USER_REQUEST_LIMIT,
-        timezone_name: str = DAILY_USER_REQUEST_LIMIT_TIMEZONE,
-    ) -> None:
-        self.limit = limit
-        self.timezone = ZoneInfo(timezone_name)
-        self._usage_by_user_id: dict[str, UserRequestUsage] = {}
-        self._lock = Lock()
-
-    def allow(self, user_id: str) -> bool:
-        today = datetime.now(self.timezone).date().isoformat()
-
-        with self._lock:
-            usage = self._usage_by_user_id.get(user_id)
-            if usage is None or usage.used_on != today:
-                self._usage_by_user_id[user_id] = UserRequestUsage(
-                    used_on=today,
-                    count=1,
-                )
-                return True
-
-            if usage.count >= self.limit:
-                return False
-
-            usage.count += 1
-            return True
-
-
-daily_user_request_limiter = DailyUserRequestLimiter()
 
 
 class LineWebhookService:
@@ -107,11 +57,11 @@ class LineWebhookService:
         self,
         settings: Settings | None = None,
         analysis_function: AnalysisFunction = analyze_phishing_image,
-        request_limiter: DailyUserRequestLimiter = daily_user_request_limiter,
+        request_limiter: UserRequestLimiter | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self.analysis_function = analysis_function
-        self.request_limiter = request_limiter
+        self.request_limiter = request_limiter or build_request_limiter(self.settings)
 
     async def process_webhook(
         self,
@@ -171,20 +121,29 @@ class LineWebhookService:
         except LineServiceError as exc:
             logger.warning("LINE reply failed: %s", type(exc).__name__)
 
-    def _is_request_allowed(self, event: dict[str, Any]) -> bool:
+    async def _is_request_allowed(self, event: dict[str, Any]) -> bool:
         user_id = extract_line_user_id(event)
         if user_id is None:
+            # グループ等で userId が無いイベントは制限対象外とする。
+            logger.debug("Skipping request limit because LINE userId is unavailable")
             return True
 
-        return self.request_limiter.allow(user_id)
+        try:
+            return await asyncio.to_thread(self.request_limiter.allow, user_id)
+        except UserRequestLimiterConfigurationError:
+            logger.error(
+                "Request limiter unavailable; rejecting image analysis",
+                exc_info=True,
+            )
+            return False
 
     async def _build_reply_text(self, event: dict[str, Any]) -> str:
         message = event.get("message")
         if not isinstance(message, dict) or message.get("type") != "image":
             return NON_IMAGE_REPLY_MESSAGE
 
-        if not self._is_request_allowed(event):
-            return REQUEST_LIMIT_EXCEEDED_REPLY_MESSAGE
+        if not await self._is_request_allowed(event):
+            return self._request_limit_exceeded_message()
 
         message_id = message.get("id")
         if not isinstance(message_id, str) or not message_id:
@@ -195,6 +154,19 @@ class LineWebhookService:
 
         analysis = await self.analysis_function(content.body, content.mime_type)
         return build_line_reply(analysis)
+
+    def _request_limit_exceeded_message(self) -> str:
+        limit = self.settings.daily_user_request_limit
+        return "\n".join(
+            [
+                "本日の利用回数が上限に達しました。",
+                "",
+                f"1日に確認できる画像は{limit}回までです。",
+                "明日また利用してください。",
+                "",
+                "不安な場合は、URLや添付を開かず、家族や公式窓口に相談してください。",
+            ],
+        )
 
     async def get_message_content(self, message_id: str) -> "LineMessageContent":
         return await asyncio.to_thread(self._get_message_content, message_id)

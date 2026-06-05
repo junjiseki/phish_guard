@@ -15,12 +15,22 @@ app_debug   = false
 app_log_level = "INFO"
 
 line_signature_verification_enabled = true
+daily_user_request_limit            = 2
+user_request_limit_store            = "firestore"
+firestore_database_id               = "(default)"
+firestore_usage_collection          = "line_user_request_usage"
 gemini_model                        = "gemini-2.5-flash"
 request_timeout_seconds             = 30
 max_image_bytes                     = 10485760
 
 # Development convenience only: Terraform state will contain these values.
-# For production, prefer creating Secret Manager versions outside Terraform.
+# For production, prefer setting the *_secret_id values below instead.
 line_channel_secret       = ""
 line_channel_access_token = ""
 gemini_api_key            = ""
+
+# Existing Secret Manager secret IDs for production use.
+# Example: line_channel_secret_secret_id = "line-channel-secret"
+line_channel_secret_secret_id       = ""
+line_channel_access_token_secret_id = ""
+gemini_api_key_secret_id            = ""

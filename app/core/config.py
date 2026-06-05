@@ -24,6 +24,20 @@ class Settings(BaseSettings):
 
     request_timeout_seconds: int = Field(default=30, alias="REQUEST_TIMEOUT_SECONDS")
     max_image_bytes: int = Field(default=10 * 1024 * 1024, alias="MAX_IMAGE_BYTES")
+    daily_user_request_limit: int = Field(default=2, alias="DAILY_USER_REQUEST_LIMIT")
+    user_request_limit_store: str = Field(
+        default="memory",
+        alias="USER_REQUEST_LIMIT_STORE",
+    )
+    gcp_project_id: str = Field(default="", alias="GCP_PROJECT_ID")
+    firestore_database_id: str = Field(
+        default="(default)",
+        alias="FIRESTORE_DATABASE_ID",
+    )
+    firestore_usage_collection: str = Field(
+        default="line_user_request_usage",
+        alias="FIRESTORE_USAGE_COLLECTION",
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",

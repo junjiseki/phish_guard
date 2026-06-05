@@ -56,6 +56,35 @@ variable "line_signature_verification_enabled" {
   default     = true
 }
 
+variable "daily_user_request_limit" {
+  description = "Daily image analysis request limit per LINE user."
+  type        = number
+  default     = 2
+}
+
+variable "user_request_limit_store" {
+  description = "Request limit storage backend. Use memory for local/dev or firestore for Cloud Run."
+  type        = string
+  default     = "firestore"
+
+  validation {
+    condition     = contains(["memory", "firestore"], var.user_request_limit_store)
+    error_message = "user_request_limit_store must be memory or firestore."
+  }
+}
+
+variable "firestore_database_id" {
+  description = "Firestore database ID used for request limit storage."
+  type        = string
+  default     = "(default)"
+}
+
+variable "firestore_usage_collection" {
+  description = "Firestore collection used for request limit storage."
+  type        = string
+  default     = "line_user_request_usage"
+}
+
 variable "gemini_model" {
   description = "Gemini model name."
   type        = string
@@ -79,6 +108,28 @@ variable "line_channel_secret" {
   type        = string
   default     = ""
   sensitive   = true
+
+  validation {
+    condition = (
+      nonsensitive(var.line_channel_secret) == ""
+      || var.line_channel_secret_secret_id == ""
+    )
+    error_message = "Set either line_channel_secret or line_channel_secret_secret_id, not both."
+  }
+}
+
+variable "line_channel_secret_secret_id" {
+  description = "Existing Secret Manager secret ID for LINE_CHANNEL_SECRET. Used when line_channel_secret is empty."
+  type        = string
+  default     = ""
+
+  validation {
+    condition = (
+      var.line_channel_secret_secret_id == ""
+      || nonsensitive(var.line_channel_secret) == ""
+    )
+    error_message = "Set either line_channel_secret or line_channel_secret_secret_id, not both."
+  }
 }
 
 variable "line_channel_access_token" {
@@ -86,6 +137,28 @@ variable "line_channel_access_token" {
   type        = string
   default     = ""
   sensitive   = true
+
+  validation {
+    condition = (
+      nonsensitive(var.line_channel_access_token) == ""
+      || var.line_channel_access_token_secret_id == ""
+    )
+    error_message = "Set either line_channel_access_token or line_channel_access_token_secret_id, not both."
+  }
+}
+
+variable "line_channel_access_token_secret_id" {
+  description = "Existing Secret Manager secret ID for LINE_CHANNEL_ACCESS_TOKEN. Used when line_channel_access_token is empty."
+  type        = string
+  default     = ""
+
+  validation {
+    condition = (
+      var.line_channel_access_token_secret_id == ""
+      || nonsensitive(var.line_channel_access_token) == ""
+    )
+    error_message = "Set either line_channel_access_token or line_channel_access_token_secret_id, not both."
+  }
 }
 
 variable "gemini_api_key" {
@@ -93,4 +166,26 @@ variable "gemini_api_key" {
   type        = string
   default     = ""
   sensitive   = true
+
+  validation {
+    condition = (
+      nonsensitive(var.gemini_api_key) == ""
+      || var.gemini_api_key_secret_id == ""
+    )
+    error_message = "Set either gemini_api_key or gemini_api_key_secret_id, not both."
+  }
+}
+
+variable "gemini_api_key_secret_id" {
+  description = "Existing Secret Manager secret ID for GEMINI_API_KEY. Used when gemini_api_key is empty."
+  type        = string
+  default     = ""
+
+  validation {
+    condition = (
+      var.gemini_api_key_secret_id == ""
+      || nonsensitive(var.gemini_api_key) == ""
+    )
+    error_message = "Set either gemini_api_key or gemini_api_key_secret_id, not both."
+  }
 }
