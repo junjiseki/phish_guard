@@ -460,6 +460,71 @@ uv run pytest
 
 テストでは外部APIを実際には呼びません。
 
+## GitHub Actions CI/CD
+
+### CI（`.github/workflows/ci.yml`）
+
+`main` / `develop` への push と pull request で次を実行します。
+
+- `uv run ruff check .`
+- `uv run pytest -q`
+- `docker build`
+- `terraform fmt -check` / `terraform validate`
+
+### CD（`.github/workflows/cd.yml`）
+
+`main` への push と手動実行で、Artifact Registry へ Docker image を push し、既存の Cloud Run サービスを更新します。
+
+初回のインフラ作成は引き続き [Cloud RunをTerraformで構築する](#cloud-runをterraformで構築する) で行ってください。CD は image の更新のみを担当します。
+
+#### 必要な GitHub 設定
+
+Repository variables:
+
+| 名前 | 例 | 必須 |
+|------|-----|------|
+| `GCP_PROJECT_ID` | `your-gcp-project-id` | はい |
+| `GCP_REGION` | `asia-northeast1` | いいえ（未設定時は `asia-northeast1`） |
+
+Repository secrets（Workload Identity Federation）:
+
+| 名前 | 内容 |
+|------|------|
+| `GCP_WORKLOAD_IDENTITY_PROVIDER` | `projects/.../locations/global/workloadIdentityPools/.../providers/...` |
+| `GCP_SERVICE_ACCOUNT` | `github-actions@your-project.iam.gserviceaccount.com` |
+
+デプロイ用サービスアカウントには最低限次の権限が必要です。
+
+- `roles/artifactregistry.writer`
+- `roles/run.admin`
+- `roles/iam.serviceAccountUser`（Cloud Run の実行 SA を指定する場合）
+
+Workload Identity Federation の作成例:
+
+以下の `YOUR_PROJECT_ID`、`PROJECT_NUMBER`、`GITHUB_OWNER`、`GITHUB_REPO` は自分の環境の値に置き換えてください。`--member` の `attribute.repository` は GitHub の `owner/repo` と一致している必要があります。
+
+```bash
+gcloud iam workload-identity-pools create github-actions \
+  --project=YOUR_PROJECT_ID \
+  --location=global \
+  --display-name="GitHub Actions"
+
+gcloud iam workload-identity-pools providers create-oidc github \
+  --project=YOUR_PROJECT_ID \
+  --location=global \
+  --workload-identity-pool=github-actions \
+  --display-name="GitHub" \
+  --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository" \
+  --issuer-uri="https://token.actions.githubusercontent.com"
+
+gcloud iam service-accounts add-iam-policy-binding github-actions@YOUR_PROJECT_ID.iam.gserviceaccount.com \
+  --project=YOUR_PROJECT_ID \
+  --role="roles/iam.workloadIdentityUser" \
+  --member="principalSet://iam.googleapis.com/projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/github-actions/attribute.repository/GITHUB_OWNER/GITHUB_REPO"
+```
+
+例: リポジトリが `https://github.com/acme-corp/phish-guard` の場合、`GITHUB_OWNER/GITHUB_REPO` は `acme-corp/phish-guard` です。
+
 ## セキュリティ方針
 
 このMVPでは、個人情報や画像の扱いをできるだけ小さくしています。
