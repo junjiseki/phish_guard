@@ -10,14 +10,42 @@ locals {
     GEMINI_API_KEY            = var.gemini_api_key
   }
 
+  existing_secret_ids = {
+    for key, value in {
+      LINE_CHANNEL_SECRET       = var.line_channel_secret_secret_id
+      LINE_CHANNEL_ACCESS_TOKEN = var.line_channel_access_token_secret_id
+      GEMINI_API_KEY            = var.gemini_api_key_secret_id
+    } : key => value if value != ""
+  }
+
   enabled_secret_keys = toset([
     for key, value in local.secret_values : key if nonsensitive(value) != ""
   ])
+
+  cloud_run_secret_ids = merge(
+    {
+      for key in local.enabled_secret_keys :
+      key => google_secret_manager_secret.app[key].secret_id
+    },
+    local.existing_secret_ids,
+  )
+
+  cloud_run_secret_versions = merge(
+    {
+      for key in local.enabled_secret_keys :
+      key => google_secret_manager_secret_version.app[key].version
+    },
+    {
+      for key in keys(local.existing_secret_ids) :
+      key => "latest"
+    },
+  )
 }
 
 resource "google_project_service" "required" {
   for_each = toset([
     "artifactregistry.googleapis.com",
+    "firestore.googleapis.com",
     "run.googleapis.com",
     "secretmanager.googleapis.com",
     "iam.googleapis.com",
@@ -73,6 +101,22 @@ resource "google_secret_manager_secret_iam_member" "cloud_run" {
   member    = "serviceAccount:${google_service_account.cloud_run.email}"
 }
 
+resource "google_secret_manager_secret_iam_member" "cloud_run_existing" {
+  for_each = local.existing_secret_ids
+
+  secret_id = each.value
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.cloud_run.email}"
+}
+
+resource "google_project_iam_member" "cloud_run_firestore_user" {
+  count = var.user_request_limit_store == "firestore" ? 1 : 0
+
+  project = var.project_id
+  role    = "roles/datastore.user"
+  member  = "serviceAccount:${google_service_account.cloud_run.email}"
+}
+
 resource "google_cloud_run_v2_service" "api" {
   name     = var.service_name
   location = var.region
@@ -115,6 +159,31 @@ resource "google_cloud_run_v2_service" "api" {
       }
 
       env {
+        name  = "DAILY_USER_REQUEST_LIMIT"
+        value = tostring(var.daily_user_request_limit)
+      }
+
+      env {
+        name  = "USER_REQUEST_LIMIT_STORE"
+        value = var.user_request_limit_store
+      }
+
+      env {
+        name  = "GCP_PROJECT_ID"
+        value = var.project_id
+      }
+
+      env {
+        name  = "FIRESTORE_DATABASE_ID"
+        value = var.firestore_database_id
+      }
+
+      env {
+        name  = "FIRESTORE_USAGE_COLLECTION"
+        value = var.firestore_usage_collection
+      }
+
+      env {
         name  = "GEMINI_MODEL"
         value = var.gemini_model
       }
@@ -130,15 +199,15 @@ resource "google_cloud_run_v2_service" "api" {
       }
 
       dynamic "env" {
-        for_each = local.enabled_secret_keys
+        for_each = local.cloud_run_secret_ids
 
         content {
-          name = env.value
+          name = env.key
 
           value_source {
             secret_key_ref {
-              secret  = google_secret_manager_secret.app[env.value].secret_id
-              version = google_secret_manager_secret_version.app[env.value].version
+              secret  = env.value
+              version = local.cloud_run_secret_versions[env.key]
             }
           }
         }
@@ -158,6 +227,8 @@ resource "google_cloud_run_v2_service" "api" {
   depends_on = [
     google_project_service.required,
     google_secret_manager_secret_iam_member.cloud_run,
+    google_secret_manager_secret_iam_member.cloud_run_existing,
+    google_project_iam_member.cloud_run_firestore_user,
   ]
 }
 
