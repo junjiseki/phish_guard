@@ -13,14 +13,16 @@ from threading import Lock
 from typing import Any, Protocol
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from app.constants import (
+    DAILY_USER_REQUEST_LIMIT,
+    DAILY_USER_REQUEST_LIMIT_TIMEZONE,
+    USER_REQUEST_LIMIT_STORE_FIRESTORE,
+    USER_REQUEST_LIMIT_STORE_MEMORY,
+)
 from app.core.config import Settings
 
 logger = logging.getLogger(__name__)
 
-DAILY_USER_REQUEST_LIMIT = 10
-DAILY_USER_REQUEST_LIMIT_TIMEZONE = "Asia/Tokyo"
-USER_REQUEST_LIMIT_STORE_MEMORY = "memory"
-USER_REQUEST_LIMIT_STORE_FIRESTORE = "firestore"
 FIRESTORE_API_BASE_URL = "https://firestore.googleapis.com/v1"
 FIRESTORE_BATCH_GET_PATH = ":batchGet"
 GCP_METADATA_TOKEN_URL = (

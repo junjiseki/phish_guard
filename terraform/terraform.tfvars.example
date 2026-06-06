@@ -15,7 +15,7 @@ app_debug   = false
 app_log_level = "INFO"
 
 line_signature_verification_enabled = true
-daily_user_request_limit            = 2
+daily_user_request_limit            = 10
 user_request_limit_store            = "firestore"
 firestore_database_id               = "(default)"
 firestore_usage_collection          = "line_user_request_usage"

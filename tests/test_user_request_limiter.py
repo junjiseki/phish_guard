@@ -2,7 +2,6 @@ import pytest
 
 from app.core.config import Settings
 from app.services.user_request_limiter import (
-    DAILY_USER_REQUEST_LIMIT,
     DailyUserRequestLimiter,
     FirestoreDailyUserRequestLimiter,
     UserRequestLimiterConfigurationError,
@@ -13,10 +12,11 @@ from app.services.user_request_limiter import (
 )
 
 EXPECTED_LIMIT_COUNT_1 = 1
+TEST_DAILY_USER_REQUEST_LIMIT = 2
 
 
 def test_daily_user_request_limiter_allows_only_configured_count() -> None:
-    limiter = DailyUserRequestLimiter(limit=DAILY_USER_REQUEST_LIMIT)
+    limiter = DailyUserRequestLimiter(limit=TEST_DAILY_USER_REQUEST_LIMIT)
 
     assert limiter.allow("user-id")
     assert limiter.allow("user-id")
