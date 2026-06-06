@@ -17,7 +17,7 @@ from app.core.config import Settings
 
 logger = logging.getLogger(__name__)
 
-DAILY_USER_REQUEST_LIMIT = 2
+DAILY_USER_REQUEST_LIMIT = 10
 DAILY_USER_REQUEST_LIMIT_TIMEZONE = "Asia/Tokyo"
 USER_REQUEST_LIMIT_STORE_MEMORY = "memory"
 USER_REQUEST_LIMIT_STORE_FIRESTORE = "firestore"
