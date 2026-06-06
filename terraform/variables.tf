@@ -59,7 +59,7 @@ variable "line_signature_verification_enabled" {
 variable "daily_user_request_limit" {
   description = "Daily image analysis request limit per LINE user."
   type        = number
-  default     = 2
+  default     = 10
 }
 
 variable "user_request_limit_store" {

@@ -3,6 +3,16 @@ from functools import lru_cache
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.constants import (
+    DAILY_USER_REQUEST_LIMIT,
+    DEFAULT_USER_REQUEST_LIMIT_STORE,
+    FIRESTORE_DATABASE_ID_DEFAULT,
+    FIRESTORE_USAGE_COLLECTION,
+    GEMINI_MODEL_DEFAULT,
+    MAX_IMAGE_BYTES_DEFAULT,
+    REQUEST_TIMEOUT_SECONDS_DEFAULT,
+)
+
 
 class Settings(BaseSettings):
     app_env: str = Field(default="local", alias="APP_ENV")
@@ -20,22 +30,31 @@ class Settings(BaseSettings):
     )
 
     gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")
-    gemini_model: str = Field(default="gemini-2.5-flash", alias="GEMINI_MODEL")
+    gemini_model: str = Field(default=GEMINI_MODEL_DEFAULT, alias="GEMINI_MODEL")
 
-    request_timeout_seconds: int = Field(default=30, alias="REQUEST_TIMEOUT_SECONDS")
-    max_image_bytes: int = Field(default=10 * 1024 * 1024, alias="MAX_IMAGE_BYTES")
-    daily_user_request_limit: int = Field(default=2, alias="DAILY_USER_REQUEST_LIMIT")
+    request_timeout_seconds: int = Field(
+        default=REQUEST_TIMEOUT_SECONDS_DEFAULT,
+        alias="REQUEST_TIMEOUT_SECONDS",
+    )
+    max_image_bytes: int = Field(
+        default=MAX_IMAGE_BYTES_DEFAULT,
+        alias="MAX_IMAGE_BYTES",
+    )
+    daily_user_request_limit: int = Field(
+        default=DAILY_USER_REQUEST_LIMIT,
+        alias="DAILY_USER_REQUEST_LIMIT",
+    )
     user_request_limit_store: str = Field(
-        default="memory",
+        default=DEFAULT_USER_REQUEST_LIMIT_STORE,
         alias="USER_REQUEST_LIMIT_STORE",
     )
     gcp_project_id: str = Field(default="", alias="GCP_PROJECT_ID")
     firestore_database_id: str = Field(
-        default="(default)",
+        default=FIRESTORE_DATABASE_ID_DEFAULT,
         alias="FIRESTORE_DATABASE_ID",
     )
     firestore_usage_collection: str = Field(
-        default="line_user_request_usage",
+        default=FIRESTORE_USAGE_COLLECTION,
         alias="FIRESTORE_USAGE_COLLECTION",
     )
 
