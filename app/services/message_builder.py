@@ -50,16 +50,22 @@ def build_line_reply(analysis: AnalysisResult) -> str:
     risk_level = analysis.risk_level
     header = RISK_HEADERS[risk_level]
     reasons = take_short_items(analysis.reasons, DEFAULT_REASONS[risk_level])
+    reply_lines = [
+        f"{risk_icon(risk_level)} {header}",
+        RISK_SUMMARIES[risk_level],
+        "",
+        "理由：",
+        *format_items(reasons),
+    ]
+
+    if risk_level == "low":
+        return "\n".join(reply_lines)
+
     actions = take_short_items(analysis.actions, DEFAULT_ACTIONS[risk_level])
     actions = ensure_consultation_action(actions, risk_level)
-
     return "\n".join(
         [
-            f"{risk_icon(risk_level)} {header}",
-            RISK_SUMMARIES[risk_level],
-            "",
-            "理由：",
-            *format_items(reasons),
+            *reply_lines,
             "",
             "対応：",
             *format_items(actions),
