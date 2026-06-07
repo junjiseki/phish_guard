@@ -101,7 +101,14 @@ export default function Home() {
       <section className="hero" id="top">
         <header className="nav" aria-label="サイトナビゲーション">
           <a className="brand" href="#top" aria-label="詐欺チェッカー ホーム">
-            <ShieldCheck size={24} aria-hidden="true" />
+            <Image
+              className="brandLogo"
+              src="/logo-mark.svg"
+              alt=""
+              width={30}
+              height={30}
+              aria-hidden="true"
+            />
             <span>詐欺チェッカー</span>
           </a>
           <nav>

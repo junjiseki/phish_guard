@@ -83,6 +83,12 @@ main {
   font-size: 1.04rem;
 }
 
+.brandLogo {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+}
+
 .nav nav {
   gap: 8px;
 }
