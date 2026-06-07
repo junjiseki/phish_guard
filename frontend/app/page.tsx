@@ -100,9 +100,16 @@ export default function Home() {
     <main>
       <section className="hero" id="top">
         <header className="nav" aria-label="サイトナビゲーション">
-          <a className="brand" href="#top" aria-label="ネット詐欺チェッカー ホーム">
-            <ShieldCheck size={24} aria-hidden="true" />
-            <span>ネット詐欺チェッカー</span>
+          <a className="brand" href="#top" aria-label="詐欺チェッカー ホーム">
+            <Image
+              className="brandLogo"
+              src="/logo-mark.svg"
+              alt=""
+              width={30}
+              height={30}
+              aria-hidden="true"
+            />
+            <span>詐欺チェッカー</span>
           </a>
           <nav>
             <a href="#purpose">目的</a>
@@ -123,7 +130,7 @@ export default function Home() {
         <div className="heroOverlay" />
         <div className="heroContent">
           <p className="eyebrow">LINEで詐欺SMS・メールをかんたん確認</p>
-          <h1>ネット詐欺チェッカー</h1>
+          <h1>詐欺チェッカー</h1>
           <p className="lead">
             怪しいSMSやメールのスクリーンショットを送るだけ。AIが危険度と対応方法を、短く分かりやすい日本語で返信します。
           </p>
@@ -135,7 +142,7 @@ export default function Home() {
               rel="noreferrer"
             >
               <MessageCircle size={20} aria-hidden="true" />
-              導入を相談する
+              友達追加する
             </a>
             <a className="secondaryButton" href="#flow">
               使い方を見る
@@ -223,7 +230,7 @@ export default function Home() {
           <div className="purposeNote">
             <AlertTriangle size={22} aria-hidden="true" />
             <p>
-              ネット詐欺チェッカーは、既存のメール保護を置き換えるものではありません。警告が出なかったメールでも、少しでも迷ったときにスクリーンショットをLINEで相談できる、最後の確認窓口として利用します。
+              詐欺チェッカーは、既存のメール保護を置き換えるものではありません。警告が出なかったメールでも、少しでも迷ったときにスクリーンショットをLINEで相談できる、最後の確認窓口として利用します。
             </p>
           </div>
         </div>
