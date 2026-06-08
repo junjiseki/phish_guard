@@ -6,6 +6,7 @@ const siteName = "詐欺チェッカー";
 const title = "詐欺チェッカー | LINEで詐欺SMS・メールをAI確認";
 const description =
   "怪しいSMSやメールのスクリーンショットをLINEで送るだけ。AIが詐欺メールやフィッシングの危険度、理由、対応方法を短く分かりやすく返信します。";
+const ogImage = "/og-image.png";
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
@@ -47,9 +48,9 @@ export const metadata: Metadata = {
     description,
     images: [
       {
-        url: "/hero-phish-guard.png",
-        width: 1536,
-        height: 864,
+        url: ogImage,
+        width: 1200,
+        height: 630,
         alt: "スマートフォンで詐欺SMSやメールをAIに相談する様子",
       },
     ],
@@ -58,7 +59,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title,
     description,
-    images: ["/hero-phish-guard.png"],
+    images: [ogImage],
   },
   robots: {
     index: true,
