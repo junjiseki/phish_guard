@@ -14,13 +14,16 @@ env:
   ARTIFACT_REGISTRY_REPOSITORY: phish-guard
   CLOUD_RUN_SERVICE: phish-guard-api
   IMAGE_NAME: phish-guard-api
+  GCP_REGION: ${{ vars.GCP_REGION || 'asia-northeast1' }}
+  GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  IMAGE_TAG: ${{ github.sha }}
+  GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+  GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
 jobs:
   deploy:
     name: Deploy to Cloud Run
     runs-on: ubuntu-latest
-    env:
-      GCP_REGION: ${{ vars.GCP_REGION || 'asia-northeast1' }}
     permissions:
       contents: read
       id-token: write
@@ -31,8 +34,8 @@ jobs:
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
 
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
@@ -41,9 +44,6 @@ jobs:
         run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
 
       - name: Build and push image
-        env:
-          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
-          IMAGE_TAG: ${{ github.sha }}
         run: |
           if [ -z "${GCP_PROJECT_ID}" ]; then
             echo "GCP_PROJECT_ID repository variable is required."
@@ -57,9 +57,6 @@ jobs:
           docker push "${IMAGE_URI}:latest"
 
       - name: Deploy to Cloud Run
-        env:
-          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
-          IMAGE_TAG: ${{ github.sha }}
         run: |
           IMAGE_URI="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${ARTIFACT_REGISTRY_REPOSITORY}/${IMAGE_NAME}:${IMAGE_TAG}"
 
