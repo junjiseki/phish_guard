@@ -54,7 +54,7 @@ const features = [
   "スクリーンショット画像をそのまま相談",
   "危険度を3段階で表示",
   "理由と対応方法を最大3つに整理",
-  "LINE Messaging API連携を前提に設計",
+  "LINEで迷わず相談できる設計",
 ];
 
 const protections = [
@@ -71,13 +71,13 @@ const protections = [
     items: [
       "迷惑メールフォルダ振り分け",
       "フィッシング警告と危険URL検知",
-      "添付ファイル検査と企業向けDefender保護",
+      "危険な添付ファイルへの警告",
     ],
   },
   {
     title: "セキュリティソフトの保護",
     items: [
-      "ESET、Norton、Trend Microなどの警告",
+      "危険なサイトへのアクセス時の警告",
       "フィッシングサイトや偽ショッピングサイト検知",
       "偽銀行サイトへのアクセス時のブロック",
     ],
@@ -181,7 +181,7 @@ export default function Home() {
           </div>
           <div>
             <LineChart size={24} aria-hidden="true" />
-            <span>相談データの運用拡張</span>
+            <span>家族や窓口で見守り</span>
           </div>
         </div>
       </section>
@@ -215,7 +215,7 @@ export default function Home() {
           <div className="reasonPanel">
             <div>
               <p className="eyebrow">Why it still happens</p>
-              <h3>技術的な判定は100%ではありません</h3>
+              <h3>どんな判定も100%ではありません</h3>
               <p>
                 被害の多くは、迷惑メールフォルダに入らなかったメールではなく、受信トレイに届いた本物に見えるメールを信じてしまうケースです。正規メールと偽メールの差が小さく、警告が出ないこともあります。
               </p>
@@ -297,7 +297,7 @@ export default function Home() {
           <AlertTriangle size={30} aria-hidden="true" />
           <h2>フィッシング相談を、LINEの窓口に</h2>
           <p>
-            MVPはFastAPI、Gemini API、LINE Messaging APIで構成。地域や家族向けの相談導線として、短い返信で不安を行動に変えます。
+            地域や家族向けの相談導線として、短い返信で不安を行動に変えます。怪しいと感じたら、まずはLINEで気軽に確認できます。
           </p>
           <a
             className="primaryButton dark"
